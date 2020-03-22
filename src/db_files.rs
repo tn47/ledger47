@@ -1,6 +1,6 @@
-use chrono::{self, offset::TimeZone};
+use chrono::{self, offset::TimeZone, Datelike};
 
-use std::{ffi, fs, marker, path};
+use std::{ffi, fs, path};
 
 use crate::core::{Durable, Error, Result};
 
@@ -193,153 +193,218 @@ impl<T: Durable> DataFile<T> {
     }
 }
 
-//pub struct JournalMonth<T>
-//where
-//    T: Ord + Durable,
-//{
-//    dir: ffi::OsString,
-//    _phantom_val: marker::PhantomData<T>,
-//}
-//
-//impl<T> JournalMonth<T>
-//where
-//    T: Ord + Durable,
-//{
-//    pub fn new(&self, month: u32) -> Result<JournalMonth<T>> {
-//        let dir = {
-//            let mut pp = path::PathBuf::new();
-//            pp.push(path::Path::new(&self.0));
-//            pp.push(&month.to_string());
-//            pp.into_os_string()
-//        };
-//        Ok(JournalMonth {
-//            dir,
-//            _phantom_val: marker::PhantomData,
-//        })
-//    }
-//
-//    pub fn iter(&self) -> Result<impl Iterator<Item = T>> {
-//        JMonthIter::new(self.dir)
-//    }
-//}
-//
-//struct JMonthIter<T>
-//where
-//    T: Ord + Durable,
-//{
-//    dir: ffi::OsString, // directory path
-//    days: Vec<ffi::OsString>,
-//    day: Option<JDayIter<T>>,
-//}
-//
-//impl<T> JMonthIter<T>
-//where
-//    T: Ord + Durable,
-//{
-//    fn new(dir: ffi::OsString) -> Result<JMonthIter<T>> {
-//        let mut days = vec![];
-//        for item in err_at!(IOError, fs::read_dir(&self.0))? {
-//            let item = err_at!(IOError, item)?;
-//
-//            match item.file_name().to_str() {
-//                Some(file_name) => match  err_at!(ParseFail,  file_name.parse::<u32>()).ok() {
-//                    let dir_loc = {
-//                        let mut pp = path::PathBuf::new();
-//                        pp.push(path::Path::new(&self.0));
-//                        pp.push(&file_name);
-//                        pp.into_os_string()
-//                    };
-//                    days.push(dir_loc);
-//                }
-//                Some(_) => (),
-//                None => err_at!(Fatal, msg: format!("{:?}", item.file_name()))?,
-//            }
-//        }
-//        txns.sort();
-//
-//        JDayIter { dir, txns }
-//    }
-//}
-//
-//impl<T> Iterator for JDayIter<T> {
-//    type Item = Result<T>;
-//
-//    fn next(&mut self) -> Option<Self::Item> {
-//        match self.txns.len() {
-//            0 => None,
-//            n => Some(Ok(self.txns.remove(0))),
-//        }
-//    }
-//}
+pub struct JournalYears<T>
+where
+    T: Ord + Durable,
+{
+    journal_dir: ffi::OsString,
+    from: chrono::Date<chrono::Utc>,
+    years: Vec<i32>,
+    year: Option<JournalYear<T>>,
+}
+
+impl<T> JournalYears<T>
+where
+    T: Ord + Durable,
+{
+    pub fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYears<T> {
+        JournalYears {
+            journal_dir,
+            from,
+            years: (from.year()..=chrono::Utc::today().year()).collect(),
+            year: Default::default(),
+        }
+    }
+}
+
+impl<T> Iterator for JournalYears<T>
+where
+    T: Ord + Durable,
+{
+    type Item = Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.year.take() {
+                Some(mut year) => match year.next() {
+                    Some(item) => {
+                        self.year = Some(year);
+                        break Some(item);
+                    }
+                    None => (),
+                },
+                None if self.years.len() == 0 => break None,
+                None => {
+                    let from = self.from.with_year(self.years.remove(0)).unwrap();
+                    self.year = Some(JournalYear::new(self.journal_dir.clone(), from));
+                }
+            }
+        }
+    }
+}
+
+pub struct JournalYear<T>
+where
+    T: Ord + Durable,
+{
+    year_dir: ffi::OsString,
+    months: Vec<u32>,
+    month: Option<JournalMonth<T>>,
+}
+
+impl<T> JournalYear<T>
+where
+    T: Ord + Durable,
+{
+    pub fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYear<T> {
+        let year_dir = {
+            let mut pp = path::PathBuf::new();
+            pp.push(path::Path::new(&journal_dir));
+            pp.push(&from.year().to_string());
+            pp.into_os_string()
+        };
+
+        JournalYear {
+            year_dir,
+            months: (from.month()..=chrono::Utc::today().month()).collect(),
+            month: Default::default(),
+        }
+    }
+}
+
+impl<T> Iterator for JournalYear<T>
+where
+    T: Ord + Durable,
+{
+    type Item = Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.month.take() {
+                Some(mut month) => match month.next() {
+                    Some(item) => {
+                        self.month = Some(month);
+                        break Some(item);
+                    }
+                    None => (),
+                },
+                None if self.months.len() == 0 => break None,
+                None => {
+                    let month = self.months.remove(0);
+                    self.month = Some(JournalMonth::new(self.year_dir.clone(), month));
+                }
+            }
+        }
+    }
+}
+
+pub struct JournalMonth<T>
+where
+    T: Ord + Durable,
+{
+    month_dir: ffi::OsString,
+    days: Vec<u32>,
+    day: Option<JournalDay<T>>,
+}
+
+impl<T> JournalMonth<T>
+where
+    T: Ord + Durable,
+{
+    pub fn new(year_dir: ffi::OsString, month: u32) -> JournalMonth<T> {
+        let month_dir = {
+            let mut pp = path::PathBuf::new();
+            pp.push(path::Path::new(&year_dir));
+            pp.push(&month.to_string());
+            pp.into_os_string()
+        };
+        JournalMonth {
+            month_dir,
+            days: (1..32).collect(),
+            day: Default::default(),
+        }
+    }
+}
+
+impl<T> Iterator for JournalMonth<T>
+where
+    T: Ord + Durable,
+{
+    type Item = Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.day.take() {
+                Some(mut day) => match day.next() {
+                    Some(item) => {
+                        self.day = Some(day);
+                        break Some(item);
+                    }
+                    None => (),
+                },
+                None if self.days.len() == 0 => break None,
+                None => {
+                    let day = self.days.remove(0);
+                    match JournalDay::new(self.month_dir.clone(), day) {
+                        Some(day) => self.day = Some(day),
+                        None => (),
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub struct JournalDay<T>
 where
     T: Ord + Durable,
 {
-    dir: ffi::OsString,
-    _phantom_val: marker::PhantomData<T>,
+    _day_dir: ffi::OsString,
+    txns: Vec<T>,
 }
 
 impl<T> JournalDay<T>
 where
     T: Ord + Durable,
 {
-    pub fn new(&self, day: u32) -> Result<JournalDay<T>> {
-        let dir = {
+    pub fn new(month_dir: ffi::OsString, day: u32) -> Option<JournalDay<T>> {
+        let day_dir = {
             let mut pp = path::PathBuf::new();
-            pp.push(path::Path::new(&self.dir));
+            pp.push(path::Path::new(&month_dir));
             pp.push(&day.to_string());
             pp.into_os_string()
         };
-        Ok(JournalDay {
-            dir,
-            _phantom_val: marker::PhantomData,
-        })
-    }
-
-    pub fn iter(&self) -> Result<impl Iterator<Item = Result<T>>> {
-        Ok(JDayIter::new(self.dir.clone())?)
-    }
-}
-
-struct JDayIter<T>
-where
-    T: Ord + Durable,
-{
-    txns: Vec<T>,
-}
-
-impl<T> JDayIter<T>
-where
-    T: Ord + Durable,
-{
-    fn new(dir: ffi::OsString) -> Result<JDayIter<T>> {
         let mut txns = vec![];
-        for item in err_at!(IOError, fs::read_dir(&dir))? {
-            let item = err_at!(IOError, item)?;
+        for item in err_at!(IOError, fs::read_dir(&day_dir)).ok()? {
+            let item = err_at!(IOError, item).ok()?;
 
             match item.file_name().to_str() {
                 Some(file_name) => {
                     let file_loc = {
                         let mut pp = path::PathBuf::new();
-                        pp.push(path::Path::new(&dir));
+                        pp.push(path::Path::new(&day_dir));
                         pp.push(&file_name);
                         pp.into_os_string()
                     };
                     let mut value: T = Default::default();
-                    value.decode(&err_at!(IOError, fs::read(&file_loc))?)?;
+                    value
+                        .decode(&err_at!(IOError, fs::read(&file_loc)).ok()?)
+                        .ok()?;
                     txns.push(value);
                 }
-                None => err_at!(Fatal, msg: format!("{:?}", item.file_name()))?,
+                None => err_at!(Fatal, msg: format!("{:?}", item.file_name())).ok()?,
             }
         }
         txns.sort();
 
-        Ok(JDayIter { txns })
+        Some(JournalDay {
+            _day_dir: day_dir,
+            txns,
+        })
     }
 }
 
-impl<T> Iterator for JDayIter<T>
+impl<T> Iterator for JournalDay<T>
 where
     T: Ord + Durable,
 {
@@ -353,7 +418,7 @@ where
     }
 }
 
-fn days(year: i32, month: u32) -> Result<Vec<chrono::Date<chrono::Utc>>> {
+fn days_in_month(year: i32, month: u32) -> Vec<chrono::Date<chrono::Utc>> {
     let mut start_date = chrono::Utc.ymd(year, month, 1);
     let mut dates = vec![];
     loop {
@@ -362,7 +427,7 @@ fn days(year: i32, month: u32) -> Result<Vec<chrono::Date<chrono::Utc>>> {
             Some(next_date) => {
                 start_date = next_date;
             }
-            None => break Ok(dates),
+            None => break dates,
         }
     }
 }

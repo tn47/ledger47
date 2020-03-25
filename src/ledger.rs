@@ -57,6 +57,7 @@ impl Ledger {
         self.note = note
     }
 }
+
 impl Durable<Json> for Ledger {
     fn to_type(&self) -> String {
         "ledger".to_string()

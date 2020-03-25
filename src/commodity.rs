@@ -10,6 +10,18 @@ struct Commodity {
     note: String,
 }
 
+impl From<(String, f64)> for Commodity {
+    fn from((name, value): (String, f64)) -> Commodity {
+        Commodity::new(name, value)
+    }
+}
+
+impl From<Commodity> for (String, f64) {
+    fn from(c: Commodity) -> (String, f64) {
+        (c.name, c.value)
+    }
+}
+
 impl Default for Commodity {
     fn default() -> Commodity {
         Commodity {

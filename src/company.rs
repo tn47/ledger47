@@ -1,4 +1,5 @@
 use chrono;
+use jsondata::{Json, Property};
 
 use crate::core::{Durable, Error, Result, Tag};
 
@@ -27,7 +28,7 @@ impl Default for Company {
     }
 }
 
-impl Durable for Company {
+impl Durable<Json> for Company {
     fn to_type(&self) -> String {
         "company".to_string()
     }
@@ -38,9 +39,7 @@ impl Durable for Company {
         key
     }
 
-    fn encode(&self, buffer: &mut Vec<u8>) -> Result<usize> {
-        use jsondata::{Json, Property};
-
+    fn encode(&self) -> Result<Json> {
         let aliases: Vec<Json> = native_to_json_string_array!(self.aliases.clone());
         let tags: Vec<Json> = native_to_json_string_array!(self.tags.clone());
         let notes: Vec<Json> = native_to_json_string_array!(self.notes.clone());
@@ -55,16 +54,11 @@ impl Durable for Company {
             Property::new("comments", Json::Array(comments)),
         ]);
 
-        let json_string = value.to_string();
-        buffer.extend_from_slice(&json_string.as_bytes());
-        Ok(json_string.as_bytes().len())
+        Ok(value)
     }
 
-    fn decode(&mut self, buffer: &[u8]) -> Result<usize> {
-        use jsondata::Json;
-
-        let s = err_at!(InvalidJson, std::str::from_utf8(buffer))?;
-        let value: Json = err_at!(InvalidJson, s.parse())?;
+    fn decode(&mut self, from: &str) -> Result<()> {
+        let value: Json = err_at!(InvalidJson, from.parse())?;
 
         self.name = json_to_native_string!(value, "/name", "company-name")?;
         self.created = {
@@ -79,6 +73,6 @@ impl Durable for Company {
         self.notes = json_to_native_string_array!(value, "/notes", "company-notes")?;
         self.comments = json_to_native_string_array!(value, "/comments", "company-comments")?;
 
-        Ok(buffer.len())
+        Ok(())
     }
 }

@@ -1,4 +1,5 @@
 use chrono::{self, offset::TimeZone, Datelike};
+use jsondata::Json;
 
 use std::{ffi, fs, path};
 
@@ -17,7 +18,7 @@ impl FileLoc {
 
     fn from_value<T>(value: &T, parent: &ffi::OsStr) -> FileLoc
     where
-        T: Durable,
+        T: Durable<Json>,
     {
         let mut pp = path::PathBuf::new();
         pp.push(parent);
@@ -33,11 +34,13 @@ impl FileLoc {
 
     fn to_value<T>(&self) -> Result<T>
     where
-        T: Durable,
+        T: Durable<Json>,
     {
         let mut value: T = Default::default();
-        let data = err_at!(IOError, fs::read(&self.0), format!("{}", value.to_type()))?;
-        value.decode(&data)?;
+        let typ = value.to_type();
+        let data = err_at!(IOError, fs::read(&self.0), typ)?;
+        let s = err_at!(InvalidJson, std::str::from_utf8(&data), typ)?;
+        value.decode(s)?;
         Ok(value)
     }
 
@@ -87,7 +90,7 @@ impl MetadataDir {
 
     pub fn new_file<T>(&self, value: T) -> Result<DataFile<T>>
     where
-        T: Durable,
+        T: Durable<Json>,
     {
         if !Self::TYPES.contains(&value.to_type().as_str()) {
             err_at!(Fatal, msg: format!("invalid type:{}", value.to_type()))?;
@@ -97,7 +100,7 @@ impl MetadataDir {
 
     pub fn iter<T>(&self) -> Result<impl Iterator<Item = DataFile<T>>>
     where
-        T: Durable,
+        T: Durable<Json>,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
@@ -116,14 +119,14 @@ impl MetadataDir {
 }
 
 #[derive(Clone)]
-pub enum DataFile<T: Durable> {
+pub enum DataFile<T: Durable<Json>> {
     Company { file_loc: FileLoc, value: T },
     Ledger { file_loc: FileLoc, value: T },
     Commodity { file_loc: FileLoc, value: T },
     Transaction { file_loc: FileLoc, value: T },
 }
 
-impl<T: Durable> DataFile<T> {
+impl<T: Durable<Json>> DataFile<T> {
     pub fn new(file_loc: FileLoc, value: T) -> Result<DataFile<T>> {
         match value.to_type().as_str() {
             "company" => Ok(DataFile::Company { file_loc, value }),
@@ -200,8 +203,7 @@ impl<T: Durable> DataFile<T> {
     }
 
     pub fn put(&mut self, value: T) -> Result<T> {
-        let mut data = vec![];
-        value.encode(&mut data)?;
+        let js_value = value.encode()?;
 
         let old_value = self.swap_value(value);
         let old_file_loc = {
@@ -211,7 +213,10 @@ impl<T: Durable> DataFile<T> {
         };
 
         err_at!(IOError, fs::rename(&self.to_url(), &old_file_loc))?;
-        err_at!(IOError, fs::write(&self.to_url(), &data))?;
+        err_at!(
+            IOError,
+            fs::write(&self.to_url(), js_value.to_string().as_bytes())
+        )?;
         err_at!(IOError, fs::remove_file(&old_file_loc))?;
 
         Ok(old_value)
@@ -231,7 +236,7 @@ impl<T: Durable> DataFile<T> {
 
 pub struct JournalYears<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     journal_dir: ffi::OsString,
     from: chrono::Date<chrono::Utc>,
@@ -241,7 +246,7 @@ where
 
 impl<T> JournalYears<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     pub fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYears<T> {
         JournalYears {
@@ -255,7 +260,7 @@ where
 
 impl<T> Iterator for JournalYears<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     type Item = Result<T>;
 
@@ -281,7 +286,7 @@ where
 
 pub struct JournalYear<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     year_dir: ffi::OsString,
     months: Vec<u32>,
@@ -290,7 +295,7 @@ where
 
 impl<T> JournalYear<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     pub fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYear<T> {
         let year_dir = {
@@ -310,7 +315,7 @@ where
 
 impl<T> Iterator for JournalYear<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     type Item = Result<T>;
 
@@ -336,7 +341,7 @@ where
 
 pub struct JournalMonth<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     month_dir: ffi::OsString,
     days: Vec<u32>,
@@ -345,7 +350,7 @@ where
 
 impl<T> JournalMonth<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     pub fn new(year_dir: ffi::OsString, month: u32) -> JournalMonth<T> {
         let month_dir = {
@@ -364,7 +369,7 @@ where
 
 impl<T> Iterator for JournalMonth<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     type Item = Result<T>;
 
@@ -393,7 +398,7 @@ where
 
 pub struct JournalDay<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     _day_dir: ffi::OsString,
     txns: Vec<T>,
@@ -401,7 +406,7 @@ where
 
 impl<T> JournalDay<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     pub fn new(month_dir: ffi::OsString, day: u32) -> Option<JournalDay<T>> {
         let day_dir = {
@@ -413,22 +418,9 @@ where
         let mut txns = vec![];
         for item in err_at!(IOError, fs::read_dir(&day_dir)).ok()? {
             let item = err_at!(IOError, item).ok()?;
-
-            match item.file_name().to_str() {
-                Some(file_name) => {
-                    let file_loc = {
-                        let mut pp = path::PathBuf::new();
-                        pp.push(path::Path::new(&day_dir));
-                        pp.push(&file_name);
-                        pp.into_os_string()
-                    };
-                    let mut value: T = Default::default();
-                    value
-                        .decode(&err_at!(IOError, fs::read(&file_loc)).ok()?)
-                        .ok()?;
-                    txns.push(value);
-                }
-                None => err_at!(Fatal, msg: format!("{:?}", item.file_name())).ok()?,
+            match Self::new_txn(&day_dir, item) {
+                Some(txn) => txns.push(txn),
+                None => continue,
             }
         }
         txns.sort();
@@ -438,11 +430,30 @@ where
             txns,
         })
     }
+
+    fn new_txn(day_dir: &ffi::OsStr, item: fs::DirEntry) -> Option<T> {
+        match item.file_name().to_str() {
+            Some(file_name) => {
+                let file_loc = {
+                    let mut pp = path::PathBuf::new();
+                    pp.push(path::Path::new(day_dir));
+                    pp.push(&file_name);
+                    pp.into_os_string()
+                };
+                let data = fs::read(&file_loc).ok()?;
+                let from = std::str::from_utf8(&data).ok()?;
+                let mut value: T = Default::default();
+                value.decode(from).ok()?;
+                Some(value)
+            }
+            None => None,
+        }
+    }
 }
 
 impl<T> Iterator for JournalDay<T>
 where
-    T: Ord + Durable,
+    T: Ord + Durable<Json>,
 {
     type Item = Result<T>;
 

@@ -1,27 +1,6 @@
-use std::{fmt, result, str::FromStr};
+use std::{result, str::FromStr};
 
 pub type Result<T> = result::Result<T, Error>;
-
-#[derive(Default, Clone)]
-pub struct Tag(String);
-
-impl From<String> for Tag {
-    fn from(s: String) -> Tag {
-        Tag(s)
-    }
-}
-
-impl From<Tag> for String {
-    fn from(s: Tag) -> String {
-        s.0
-    }
-}
-
-impl fmt::Display for Tag {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        write!(f, "{}", self.0)
-    }
-}
 
 // data-types and report-types can be durable.
 pub trait Durable<T>: Default + Clone

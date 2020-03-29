@@ -3,7 +3,12 @@ use jsondata::Json;
 
 use std::{ffi, fs, path};
 
-use crate::core::{Durable, Error, Result};
+use crate::{
+    core::{Durable, Error, Result, Store},
+    types::{Transaction, Workspace},
+};
+
+// TODO: what is here is a crash when calling put() API ?
 
 #[derive(Clone)]
 pub struct FileLoc(ffi::OsString);
@@ -31,6 +36,61 @@ impl FileLoc {
         pp.push(parent);
         pp.push(&format!("{}.json", key));
         FileLoc(pp.into_os_string())
+    }
+
+    fn from_journal_key(parent: &ffi::OsStr, key: &str) -> Result<FileLoc> {
+        let parts: Vec<&str> = key.split("-").collect();
+        if parts.len() >= 3 {
+            let mut pp = path::PathBuf::new();
+            pp.push(parent);
+            pp.push(parts[0]);
+            pp.push(parts[1]);
+            pp.push(parts[2]);
+            pp.push(&format!("{}.json", key));
+            Ok(FileLoc(pp.into_os_string()))
+        } else {
+            err_at!(InvalidFile, msg: format!("journalkey:{}", key))
+        }
+    }
+
+    fn create_dir_all(&self) -> Result<()> {
+        match path::Path::new(&self.0).parent() {
+            Some(parent) => err_at!(IOError, fs::create_dir_all(&parent))?,
+            None => err_at!(InvalidFile, msg: format!("{:?}", self.0))?,
+        }
+
+        Ok(())
+    }
+}
+
+impl FileLoc {
+    fn put<V>(&self, value: V) -> Result<Option<V>>
+    where
+        V: Durable<Json>,
+    {
+        let old_value = self.to_value().ok();
+        err_at!(
+            IOError,
+            fs::write(&self.0, value.encode()?.to_string().as_bytes())
+        )?;
+
+        Ok(old_value)
+    }
+
+    fn get<V>(&self) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        self.to_value()
+    }
+
+    fn delete<V>(self) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value = self.to_value()?;
+        err_at!(IOError, fs::remove_file(&self.0))?;
+        Ok(value)
     }
 }
 
@@ -67,68 +127,113 @@ impl From<FileLoc> for ffi::OsString {
     }
 }
 
-pub struct Workspace(ffi::OsString);
+pub struct Db {
+    dir: ffi::OsString,
+    w: Workspace,
+}
 
-impl Workspace {
-    pub fn new(dir: ffi::OsString) -> Workspace {
-        Workspace(dir)
-    }
-
-    pub fn open<V>(&self) -> Result<V>
-    where
-        V: Durable<Json>,
-    {
-        let w_dir = path::Path::new(&self.0);
+impl Db {
+    pub fn open(dir: ffi::OsString) -> Result<Db> {
+        let w_dir = path::Path::new(&dir);
         if w_dir.exists() {
-            let file_loc = FileLoc::from_key(&self.0, "workspace");
-            file_loc.to_value()
+            let file_loc = FileLoc::from_key(&dir, "workspace");
+            let value: Workspace = file_loc.to_value()?;
+            Ok(Db {
+                dir: w_dir.as_os_str().to_os_string(),
+                w: value,
+            })
         } else {
-            err_at!(NotFound, msg: format!("dir:{:?}", self.0))
+            err_at!(NotFound, msg: format!("dir:{:?}", dir))?
         }
     }
 
-    pub fn create<V>(&self, value: V) -> Result<()>
+    pub fn create(dir: ffi::OsString, value: Workspace) -> Result<Db> {
+        let db = Db {
+            dir: dir.clone(),
+            w: value,
+        };
+        err_at!(IOError, fs::create_dir_all(&dir))?;
+        err_at!(IOError, fs::create_dir_all(&db.to_metadata_dir().0))?;
+        err_at!(IOError, fs::create_dir_all(&db.to_journal_dir().0))?;
+
+        let file_loc = FileLoc::from_key(&dir, "workspace");
+        file_loc.put(db.w.clone());
+
+        Ok(db)
+    }
+}
+
+impl Store<Json> for Db {
+    fn put<V>(&self, value: V) -> Result<Option<V>>
     where
         V: Durable<Json>,
     {
-        err_at!(IOError, fs::create_dir_all(&self.0))?;
-        err_at!(IOError, fs::create_dir_all(&self.to_metadata_dir().0))?;
-        err_at!(IOError, fs::create_dir_all(&self.to_spool_dir().0))?;
-        err_at!(IOError, fs::create_dir_all(&self.to_journal_dir().0))?;
-
-        let file_loc = FileLoc::from_key(&self.0, "workspace");
-
-        let df = DataFile::Workspace { file_loc, value };
-        df.create()
+        match value.to_type().as_str() {
+            "company" | "commodity" | "ledger" => {
+                let meta_dir = self.to_metadata_dir();
+                meta_dir.put(value)
+            }
+            "transaction" => {
+                let jrn_dir = self.to_journal_dir();
+                jrn_dir.put(value)
+            }
+            _ => err_at!(Fatal, msg: format!("unreachable"))?,
+        }
     }
 
+    fn get<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value: V = Default::default();
+
+        match value.to_type().as_str() {
+            "company" | "commodity" | "ledger" => {
+                let meta_dir = self.to_metadata_dir();
+                meta_dir.get(key)
+            }
+            "transaction" => {
+                let jrn_dir = self.to_journal_dir();
+                jrn_dir.get(key)
+            }
+            _ => err_at!(Fatal, msg: format!("unreachable"))?,
+        }
+    }
+
+    fn delete<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value: V = Default::default();
+
+        match value.to_type().as_str() {
+            "company" | "commodity" | "ledger" => {
+                let meta_dir = self.to_metadata_dir();
+                meta_dir.delete(key)
+            }
+            "transaction" => {
+                let jrn_dir = self.to_journal_dir();
+                jrn_dir.delete(key)
+            }
+            _ => err_at!(Fatal, msg: format!("unreachable"))?,
+        }
+    }
+}
+
+impl Db {
     pub fn to_metadata_dir(&self) -> MetadataDir {
         let mut pp = path::PathBuf::new();
-        pp.push(&self.0);
+        pp.push(&self.dir);
         pp.push("metadata");
         MetadataDir(pp.into_os_string())
     }
 
-    pub fn to_spool_dir(&self) -> SpoolDir {
-        let mut pp = path::PathBuf::new();
-        pp.push(&self.0);
-        pp.push("spool");
-        SpoolDir(pp.into_os_string())
-    }
-
     pub fn to_journal_dir(&self) -> JournalDir {
         let mut pp = path::PathBuf::new();
-        pp.push(path::Path::new(&self.0));
+        pp.push(path::Path::new(&self.dir));
         pp.push("journal");
         JournalDir(pp.into_os_string())
     }
-
-    //pub fn to_report_dir(&self) -> ReportDir {
-    //    let mut pp = path::PathBuf::new();
-    //    pp.push(path::Path::new(&self.0));
-    //    pp.push("report");
-    //    MetadataDir(pp.into_os_string())
-    //}
 }
 
 pub struct MetadataDir(ffi::OsString);
@@ -136,7 +241,7 @@ pub struct MetadataDir(ffi::OsString);
 impl MetadataDir {
     const TYPES: [&'static str; 3] = ["company", "commodity", "ledger"];
 
-    pub fn create<V>(&self, value: V) -> Result<DataFile<V>>
+    pub fn put<V>(&self, value: V) -> Result<Option<V>>
     where
         V: Durable<Json>,
     {
@@ -144,92 +249,49 @@ impl MetadataDir {
         if !Self::TYPES.contains(&typ.as_str()) {
             err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
         }
-        let df = {
-            let file_loc = FileLoc::from_value(&self.0, &value);
-            match typ.as_str() {
-                "company" => DataFile::Company { file_loc, value },
-                "ledger" => DataFile::Ledger { file_loc, value },
-                "commodity" => DataFile::Commodity { file_loc, value },
-                _ => err_at!(Fatal, msg: format!("unreachable"))?,
-            }
-        };
 
-        df.create();
-
-        Ok(df)
+        let file_loc = FileLoc::from_value(&self.0, &value);
+        file_loc.put(value)
     }
 
-    pub fn get<V>(&self, key: String) -> Result<DataFile<V>>
+    pub fn get<V>(&self, key: &str) -> Result<V>
     where
         V: Durable<Json>,
     {
-        let file_loc = FileLoc::from_key(&self.0, &key);
-        let value: V = file_loc.to_value()?;
-        let typ = value.to_type();
+        let value: V = Default::default();
 
+        let typ = value.to_type();
         if !Self::TYPES.contains(&typ.as_str()) {
             err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
         }
-        match typ.as_str() {
-            "company" => Ok(DataFile::Company { file_loc, value }),
-            "ledger" => Ok(DataFile::Ledger { file_loc, value }),
-            "commodity" => Ok(DataFile::Commodity { file_loc, value }),
-            _ => err_at!(Fatal, msg: format!("unreachable"))?,
-        }
+
+        let file_loc = FileLoc::from_key(&self.0, key);
+        file_loc.get()
     }
 
-    pub fn iter<V>(&self) -> Result<impl Iterator<Item = DataFile<V>>>
+    pub fn delete<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value: V = Default::default();
+
+        let typ = value.to_type();
+        if !Self::TYPES.contains(&typ.as_str()) {
+            err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
+        }
+
+        let file_loc = FileLoc::from_key(&self.0, key);
+        file_loc.delete()
+    }
+
+    pub fn iter<V>(&self) -> Result<impl Iterator<Item = V>>
     where
         V: Durable<Json>,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
             let item = err_at!(IOError, item, format!("{:?}", self.0))?;
-
-            let file_loc = FileLoc::new(&self.0, &item.file_name());
-            DataFile::open(file_loc).map(|df| dfs.push(df));
-        }
-
-        Ok(dfs.into_iter())
-    }
-}
-
-pub struct SpoolDir(ffi::OsString);
-
-impl SpoolDir {
-    const TYPES: [&'static str; 1] = ["transaction"];
-
-    pub fn create<V>(&self, value: V) -> Result<DataFile<V>>
-    where
-        V: Durable<Json>,
-    {
-        let typ = value.to_type();
-        if !Self::TYPES.contains(&typ.as_str()) {
-            err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
-        }
-        let df = {
-            let file_loc = FileLoc::from_value(&self.0, &value);
-            match typ.as_str() {
-                "transaction" => DataFile::Transaction { file_loc, value },
-                _ => err_at!(Fatal, msg: format!("unreachable"))?,
-            }
-        };
-
-        df.create();
-
-        Ok(df)
-    }
-
-    pub fn iter<V>(&self) -> Result<impl Iterator<Item = DataFile<V>>>
-    where
-        V: Durable<Json>,
-    {
-        let mut dfs = vec![];
-        for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
-            let item = err_at!(IOError, item, format!("{:?}", self.0))?;
-
-            let file_loc = FileLoc::new(&self.0, &item.file_name());
-            DataFile::open(file_loc).map(|df| dfs.push(df));
+            dfs.push(FileLoc::new(&self.0, &item.file_name()).to_value()?);
         }
 
         Ok(dfs.into_iter())
@@ -238,36 +300,115 @@ impl SpoolDir {
 
 pub struct JournalDir(ffi::OsString);
 
-//impl JournalDir {
-//    fn create(&self, value: Transaction) -> Result<DataFile<Transaction>> {
-//        let dir = {
-//            let created_on = value.to_created_dt();
-//            let mut pp = path::PathBuf::new();
-//            pp.push(&self.0);
-//            pp.push(&created_on.year().to_string());
-//            pp.push(&created_on.month().to_string());
-//            pp.push(&created_on.day().to_string());
-//            pp.into_os_string()
-//        };
-//        err_at!(IOError, fs::create_dir_all(&dir))?;
-//        let df = {
-//            let file_loc = FileLoc::from_value(&dir, &value);
-//            DataFile::Transaction { file_loc, value }
-//        };
-//        df.create();
-//
-//        Ok(df)
-//    }
-//
-//    fn iter(
-//        &self,
-//        from: chrono::DateTime<chrono::Utc>,
-//        to: chrono::DateTime<chrono::Utc>,
-//    ) -> impl Iterator<Item = Transaction> {
-//        let iter = JournalYears::new(self.0, from.clone());
-//        iter.take_while(|t| t.created < to)
-//    }
-//}
+impl JournalDir {
+    const TYPES: [&'static str; 3] = ["company", "commodity", "ledger"];
+
+    fn put<V>(&self, value: V) -> Result<Option<V>>
+    where
+        V: Durable<Json>,
+    {
+        let typ = value.to_type();
+        if !Self::TYPES.contains(&typ.as_str()) {
+            err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
+        }
+
+        let key = value.to_key();
+        let file_loc = FileLoc::from_journal_key(&self.0, &key)?;
+        file_loc.create_dir_all()?;
+
+        file_loc.put(value)
+    }
+
+    pub fn get<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value: V = Default::default();
+
+        let typ = value.to_type();
+        if !Self::TYPES.contains(&typ.as_str()) {
+            err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
+        }
+
+        let file_loc = FileLoc::from_key(&self.0, key);
+        file_loc.get()
+    }
+
+    pub fn delete<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let value: V = Default::default();
+
+        let typ = value.to_type();
+        if !Self::TYPES.contains(&typ.as_str()) {
+            err_at!(Fatal, msg: format!("invalid type:{}", typ))?;
+        }
+
+        let file_loc = FileLoc::from_key(&self.0, key);
+        file_loc.delete()
+    }
+
+    fn iter(
+        &self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> impl Iterator<Item = Result<Transaction>> {
+        IterTransaction::new(self.0.clone(), from, to)
+    }
+}
+
+struct IterTransaction {
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+    iter: JournalYears<Transaction>,
+    done: bool,
+}
+
+impl IterTransaction {
+    fn new(
+        dir: ffi::OsString,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> IterTransaction {
+        let iter = JournalYears::new(dir, from.date());
+        IterTransaction {
+            from: from,
+            to: to,
+            iter,
+            done: false,
+        }
+    }
+}
+
+impl Iterator for IterTransaction {
+    type Item = Result<Transaction>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            loop {
+                match self.iter.next() {
+                    Some(res) => match res {
+                        Ok(txn) if txn.created >= self.from && txn.created <= self.to => {
+                            break Some(Ok(txn))
+                        }
+                        Ok(_) => continue,
+                        Err(err) => {
+                            self.done = true;
+                            break Some(Err(err));
+                        }
+                    },
+                    None => {
+                        self.done = true;
+                        break None;
+                    }
+                }
+            }
+        } else {
+            None
+        }
+    }
+}
 
 struct JournalYears<V>
 where
@@ -497,150 +638,6 @@ where
             0 => None,
             _ => Some(Ok(self.txns.remove(0))),
         }
-    }
-}
-
-#[derive(Clone)]
-pub enum DataFile<V>
-where
-    V: Durable<Json>,
-{
-    Workspace { file_loc: FileLoc, value: V },
-    Company { file_loc: FileLoc, value: V },
-    Ledger { file_loc: FileLoc, value: V },
-    Commodity { file_loc: FileLoc, value: V },
-    Transaction { file_loc: FileLoc, value: V },
-}
-
-impl<V> DataFile<V>
-where
-    V: Durable<Json>,
-{
-    pub fn create(&self) -> Result<()> {
-        let value = self.to_value();
-        err_at!(
-            IOError,
-            fs::write(&self.to_file_loc(), value.encode()?.to_string().as_bytes())
-        )?;
-        Ok(())
-    }
-
-    pub fn open(file_loc: FileLoc) -> Result<DataFile<V>> {
-        let value: V = file_loc.to_value()?;
-        match value.to_type().as_str() {
-            "workspace" => Ok(DataFile::Transaction { file_loc, value }),
-            "company" => Ok(DataFile::Company { file_loc, value }),
-            "ledger" => Ok(DataFile::Ledger { file_loc, value }),
-            "commodity" => Ok(DataFile::Commodity { file_loc, value }),
-            "transaction" => Ok(DataFile::Transaction { file_loc, value }),
-            _ => err_at!(Fatal, msg: format!("unreachable")),
-        }
-    }
-
-    pub fn update(&mut self, value: V) -> Result<V> {
-        let js_value = value.encode()?;
-
-        let old_value = self.swap_value(value);
-        let old_file_loc = {
-            let mut old_file_loc = self.to_file_loc().clone();
-            old_file_loc.push(".old");
-            old_file_loc
-        };
-
-        err_at!(IOError, fs::rename(&self.to_file_loc(), &old_file_loc))?;
-        err_at!(
-            IOError,
-            fs::write(&self.to_file_loc(), js_value.to_string().as_bytes())
-        )?;
-        err_at!(IOError, fs::remove_file(&old_file_loc))?;
-
-        Ok(old_value)
-    }
-
-    pub fn delete(self) -> Result<()> {
-        let file_loc: ffi::OsString = match self {
-            DataFile::Workspace { file_loc, .. } => file_loc,
-            DataFile::Company { file_loc, .. } => file_loc,
-            DataFile::Ledger { file_loc, .. } => file_loc,
-            DataFile::Commodity { file_loc, .. } => file_loc,
-            DataFile::Transaction { file_loc, .. } => file_loc,
-        }
-        .into();
-        err_at!(IOError, fs::remove_file(file_loc))
-    }
-}
-
-impl<V> DataFile<V>
-where
-    V: Durable<Json>,
-{
-    fn to_file_loc(&self) -> ffi::OsString {
-        match self {
-            DataFile::Workspace { file_loc, .. } => file_loc.0.clone(),
-            DataFile::Company { file_loc, .. } => file_loc.0.clone(),
-            DataFile::Ledger { file_loc, .. } => file_loc.0.clone(),
-            DataFile::Commodity { file_loc, .. } => file_loc.0.clone(),
-            DataFile::Transaction { file_loc, .. } => file_loc.0.clone(),
-        }
-    }
-
-    fn to_value(&self) -> V {
-        match self {
-            DataFile::Workspace { value, .. } => value,
-            DataFile::Company { value, .. } => value,
-            DataFile::Ledger { value, .. } => value,
-            DataFile::Commodity { value, .. } => value,
-            DataFile::Transaction { value, .. } => value,
-        }
-        .clone()
-    }
-
-    fn is_old_version(&self) -> bool {
-        match self {
-            DataFile::Workspace { file_loc, .. } => file_loc,
-            DataFile::Company { file_loc, .. } => file_loc,
-            DataFile::Ledger { file_loc, .. } => file_loc,
-            DataFile::Commodity { file_loc, .. } => file_loc,
-            DataFile::Transaction { file_loc, .. } => file_loc,
-        }
-        .is_old_version()
-    }
-
-    fn older_version(&self, other: &DataFile<V>) -> Result<Option<ffi::OsString>> {
-        if self.is_old_version() == false && other.is_old_version() == false {
-            Ok(None)
-        } else {
-            let (file_loc, other_file_loc) = (self.to_file_loc(), other.to_file_loc());
-            let file_loc = file_loc.to_str().unwrap().to_string();
-            let other_file_loc = other_file_loc.to_str().unwrap().to_string();
-
-            let mut file_loc1 = file_loc.clone();
-            file_loc1.push_str(".old");
-
-            let mut other_file_loc1 = file_loc.clone();
-            other_file_loc1.push_str(".old");
-
-            if file_loc1 == other_file_loc {
-                Ok(Some(other_file_loc.into()))
-            } else if other_file_loc1 == file_loc {
-                Ok(Some(file_loc.into()))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-
-    fn swap_value(&mut self, value: V) -> V {
-        let v_ref = match self {
-            DataFile::Workspace { value, .. } => value,
-            DataFile::Company { value, .. } => value,
-            DataFile::Commodity { value, .. } => value,
-            DataFile::Ledger { value, .. } => value,
-            DataFile::Transaction { value, .. } => value,
-        };
-        let old_value = v_ref.clone();
-        *v_ref = value;
-        old_value
     }
 }
 

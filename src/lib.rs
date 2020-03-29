@@ -3,4 +3,3 @@ pub mod core;
 pub mod util;
 pub mod db_files;
 pub mod types;
-pub mod workspace;

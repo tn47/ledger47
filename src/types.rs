@@ -1,11 +1,68 @@
-use chrono;
+use chrono::{self, Datelike};
 use jsondata::{Json, Property};
 use uuid;
+
+use std::cmp;
 
 use crate::core::{Durable, Error, Result};
 
 #[derive(Clone)]
-struct Commodity {
+pub struct Workspace {
+    name: String,
+}
+
+impl From<String> for Workspace {
+    fn from(name: String) -> Workspace {
+        Workspace { name }
+    }
+}
+
+impl From<Workspace> for String {
+    fn from(w: Workspace) -> String {
+        w.name
+    }
+}
+
+impl Default for Workspace {
+    fn default() -> Workspace {
+        Workspace {
+            name: Default::default(),
+        }
+    }
+}
+
+impl Workspace {
+    fn new(name: String) -> Workspace {
+        Workspace { name }
+    }
+}
+
+impl Durable<Json> for Workspace {
+    fn to_type(&self) -> String {
+        "workspace".to_string()
+    }
+
+    fn to_key(&self) -> String {
+        self.to_type()
+    }
+
+    fn encode(&self) -> Result<Json> {
+        let value = Json::Object(vec![Property::new("name", Json::String(self.name.clone()))]);
+
+        Ok(value)
+    }
+
+    fn decode(&mut self, from: &str) -> Result<()> {
+        let value: Json = err_at!(InvalidJson, from.parse())?;
+
+        self.name = json_to_native_string!(value, "/name", "workspace-name")?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct Commodity {
     name: String,
     value: f64,
     tags: Vec<String>,
@@ -77,9 +134,7 @@ impl Durable<Json> for Commodity {
     }
 
     fn to_key(&self) -> String {
-        let mut key = self.to_type();
-        key.push_str(&format!("-{}", self.name));
-        key
+        format!("{}-{}", self.to_type(), self.name)
     }
 
     fn encode(&self) -> Result<Json> {
@@ -111,7 +166,7 @@ impl Durable<Json> for Commodity {
 }
 
 #[derive(Clone)]
-struct Company {
+pub struct Company {
     // required fields
     name: String,
     created: chrono::DateTime<chrono::Utc>,
@@ -173,9 +228,7 @@ impl Durable<Json> for Company {
     }
 
     fn to_key(&self) -> String {
-        let mut key = self.to_type();
-        key.push_str(&format!("-{}", self.name));
-        key
+        format!("{}-{}", self.to_type(), self.name)
     }
 
     fn encode(&self) -> Result<Json> {
@@ -207,7 +260,7 @@ impl Durable<Json> for Company {
 }
 
 #[derive(Clone)]
-struct Ledger {
+pub struct Ledger {
     name: String,
     created: chrono::DateTime<chrono::Utc>,
     tags: Vec<String>,
@@ -267,9 +320,7 @@ impl Durable<Json> for Ledger {
     }
 
     fn to_key(&self) -> String {
-        let mut key = self.to_type();
-        key.push_str(&format!("-{}", self.name));
-        key
+        format!("{}-{}", self.to_type(), self.name)
     }
 
     fn encode(&self) -> Result<Json> {
@@ -301,26 +352,46 @@ impl Durable<Json> for Ledger {
 }
 
 #[derive(Clone)]
-struct Creditor {
+pub(crate) struct Creditor {
     ledger: String,
     commodity: (String, f64),
 }
 
 #[derive(Clone)]
-struct Debitor {
+pub(crate) struct Debitor {
     ledger: String,
     commodity: (String, f64),
 }
 
 #[derive(Clone)]
-struct Transaction {
-    uuid: u128,
-    payee: String,
-    created: chrono::DateTime<chrono::Utc>,
-    creditors: Vec<Creditor>,
-    debitors: Vec<Debitor>,
-    tags: Vec<String>,
-    note: String,
+pub struct Transaction {
+    pub(crate) uuid: u128,
+    pub(crate) payee: String,
+    pub(crate) created: chrono::DateTime<chrono::Utc>,
+    pub(crate) creditors: Vec<Creditor>,
+    pub(crate) debitors: Vec<Debitor>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) note: String,
+}
+
+impl Eq for Transaction {}
+
+impl PartialOrd for Transaction {
+    fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
+        self.created.partial_cmp(&rhs.created)
+    }
+}
+
+impl PartialEq for Transaction {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.created.eq(&rhs.created)
+    }
+}
+
+impl Ord for Transaction {
+    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+        self.created.cmp(&rhs.created)
+    }
 }
 
 impl Default for Transaction {
@@ -390,9 +461,14 @@ impl Durable<Json> for Transaction {
     }
 
     fn to_key(&self) -> String {
-        let mut key = self.to_type();
-        key.push_str(&format!("-{}", self.uuid));
-        key
+        format!(
+            "{}-{}-{}-{}-{}",
+            self.created.year(),
+            self.created.month(),
+            self.created.day(),
+            self.to_type(),
+            self.uuid
+        )
     }
 
     fn encode(&self) -> Result<Json> {

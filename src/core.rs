@@ -3,25 +3,44 @@ use std::{fmt, result, str::FromStr};
 pub type Result<T> = result::Result<T, Error>;
 
 // data-types and report-types can be durable.
-pub trait Durable<T>: Default + Clone
+pub trait Durable<D>: Default + Clone
 where
-    T: ToString + FromStr,
+    D: ToString + FromStr,
 {
     // type name must be unique across data and reports
     fn to_type(&self) -> String;
     // a unique key across all values of any type.
     fn to_key(&self) -> String;
     // serialize data-value or report-value that can be persisted.
-    fn encode(&self) -> Result<T>;
+    fn encode(&self) -> Result<D>;
     // de-serialize data-value or report-value from bytes.
     fn decode(&mut self, from: &str) -> Result<()>;
 }
 
+pub trait Store<D>
+where
+    D: ToString + FromStr,
+{
+    fn put<V>(&self, value: V) -> Result<Option<V>>
+    where
+        V: Durable<D>;
+
+    fn get<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<D>;
+
+    fn delete<V>(&self, key: &str) -> Result<V>
+    where
+        V: Durable<D>;
+}
+
 pub enum Error {
+    KeyNotFound(String),
     Fatal(String),
     IOError(String),
     InvalidDate(String),
     InvalidJson(String),
+    InvalidFile(String),
     NoEdit(String),
     NotFound(String),
 }
@@ -29,10 +48,12 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         match self {
+            Error::KeyNotFound(msg) => write!(f, "KeyNotFound:{}", msg),
             Error::Fatal(msg) => write!(f, "Fatal:{}", msg),
             Error::IOError(msg) => write!(f, "IOError:{}", msg),
             Error::InvalidDate(msg) => write!(f, "InvalidDate:{}", msg),
             Error::InvalidJson(msg) => write!(f, "InvalidJson:{}", msg),
+            Error::InvalidFile(msg) => write!(f, "InvalidFile:{}", msg),
             Error::NoEdit(msg) => write!(f, "NoEdit:{}", msg),
             Error::NotFound(msg) => write!(f, "NotFound:{}", msg),
         }

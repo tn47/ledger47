@@ -3,6 +3,7 @@ pub mod core;
 pub mod util;
 pub mod commodity;
 pub mod company;
+pub mod db;
 pub mod db_files;
 pub mod ledger;
 pub mod transaction;

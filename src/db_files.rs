@@ -16,9 +16,9 @@ impl FileLoc {
         FileLoc(pp.into_os_string())
     }
 
-    fn from_value<T>(parent: &ffi::OsStr, value: &T) -> FileLoc
+    fn from_value<V>(parent: &ffi::OsStr, value: &V) -> FileLoc
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let mut pp = path::PathBuf::new();
         pp.push(parent);
@@ -41,11 +41,11 @@ impl FileLoc {
         old
     }
 
-    fn to_value<T>(&self) -> Result<T>
+    fn to_value<V>(&self) -> Result<V>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
-        let mut value: T = Default::default();
+        let mut value: V = Default::default();
         let typ = value.to_type();
         let data = err_at!(IOError, fs::read(&self.0), typ)?;
         let s = err_at!(InvalidJson, std::str::from_utf8(&data), typ)?;
@@ -70,14 +70,36 @@ impl From<FileLoc> for ffi::OsString {
 pub struct Workspace(ffi::OsString);
 
 impl Workspace {
-    fn new(dir: ffi::OsString) -> Result<Workspace> {
-        err_at!(IOError, fs::create_dir_all(&dir))?;
-        let w = Workspace(dir);
-        err_at!(IOError, fs::create_dir_all(&w.to_metadata_dir().0))?;
-        err_at!(IOError, fs::create_dir_all(&w.to_spool_dir().0))?;
-        err_at!(IOError, fs::create_dir_all(&w.to_journal_dir().0))?;
+    pub fn new(dir: ffi::OsString) -> Workspace {
+        Workspace(dir)
+    }
 
-        Ok(w)
+    pub fn open<V>(&self) -> Result<V>
+    where
+        V: Durable<Json>,
+    {
+        let w_dir = path::Path::new(&self.0);
+        if w_dir.exists() {
+            let file_loc = FileLoc::from_key(&self.0, "workspace");
+            file_loc.to_value()
+        } else {
+            err_at!(NotFound, msg: format!("dir:{:?}", self.0))
+        }
+    }
+
+    pub fn create<V>(&self, value: V) -> Result<()>
+    where
+        V: Durable<Json>,
+    {
+        err_at!(IOError, fs::create_dir_all(&self.0))?;
+        err_at!(IOError, fs::create_dir_all(&self.to_metadata_dir().0))?;
+        err_at!(IOError, fs::create_dir_all(&self.to_spool_dir().0))?;
+        err_at!(IOError, fs::create_dir_all(&self.to_journal_dir().0))?;
+
+        let file_loc = FileLoc::from_key(&self.0, "workspace");
+
+        let df = DataFile::Workspace { file_loc, value };
+        df.create()
     }
 
     pub fn to_metadata_dir(&self) -> MetadataDir {
@@ -114,9 +136,9 @@ pub struct MetadataDir(ffi::OsString);
 impl MetadataDir {
     const TYPES: [&'static str; 3] = ["company", "commodity", "ledger"];
 
-    pub fn create<T>(&self, value: T) -> Result<DataFile<T>>
+    pub fn create<V>(&self, value: V) -> Result<DataFile<V>>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let typ = value.to_type();
         if !Self::TYPES.contains(&typ.as_str()) {
@@ -137,12 +159,12 @@ impl MetadataDir {
         Ok(df)
     }
 
-    pub fn get<T>(&self, key: String) -> Result<DataFile<T>>
+    pub fn get<V>(&self, key: String) -> Result<DataFile<V>>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let file_loc = FileLoc::from_key(&self.0, &key);
-        let value: T = file_loc.to_value()?;
+        let value: V = file_loc.to_value()?;
         let typ = value.to_type();
 
         if !Self::TYPES.contains(&typ.as_str()) {
@@ -156,9 +178,9 @@ impl MetadataDir {
         }
     }
 
-    pub fn iter<T>(&self) -> Result<impl Iterator<Item = DataFile<T>>>
+    pub fn iter<V>(&self) -> Result<impl Iterator<Item = DataFile<V>>>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
@@ -177,9 +199,9 @@ pub struct SpoolDir(ffi::OsString);
 impl SpoolDir {
     const TYPES: [&'static str; 1] = ["transaction"];
 
-    pub fn create<T>(&self, value: T) -> Result<DataFile<T>>
+    pub fn create<V>(&self, value: V) -> Result<DataFile<V>>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let typ = value.to_type();
         if !Self::TYPES.contains(&typ.as_str()) {
@@ -198,9 +220,9 @@ impl SpoolDir {
         Ok(df)
     }
 
-    pub fn iter<T>(&self) -> Result<impl Iterator<Item = DataFile<T>>>
+    pub fn iter<V>(&self) -> Result<impl Iterator<Item = DataFile<V>>>
     where
-        T: Durable<Json>,
+        V: Durable<Json>,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
@@ -247,21 +269,21 @@ pub struct JournalDir(ffi::OsString);
 //    }
 //}
 
-struct JournalYears<T>
+struct JournalYears<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
     journal_dir: ffi::OsString,
     from: chrono::Date<chrono::Utc>,
     years: Vec<i32>,
-    year: Option<JournalYear<T>>,
+    year: Option<JournalYear<V>>,
 }
 
-impl<T> JournalYears<T>
+impl<V> JournalYears<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYears<T> {
+    fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYears<V> {
         JournalYears {
             journal_dir,
             from,
@@ -271,11 +293,11 @@ where
     }
 }
 
-impl<T> Iterator for JournalYears<T>
+impl<V> Iterator for JournalYears<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    type Item = Result<T>;
+    type Item = Result<V>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -297,20 +319,20 @@ where
     }
 }
 
-struct JournalYear<T>
+struct JournalYear<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
     year_dir: ffi::OsString,
     months: Vec<u32>,
-    month: Option<JournalMonth<T>>,
+    month: Option<JournalMonth<V>>,
 }
 
-impl<T> JournalYear<T>
+impl<V> JournalYear<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYear<T> {
+    fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYear<V> {
         let year_dir = {
             let mut pp = path::PathBuf::new();
             pp.push(path::Path::new(&journal_dir));
@@ -326,11 +348,11 @@ where
     }
 }
 
-impl<T> Iterator for JournalYear<T>
+impl<V> Iterator for JournalYear<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    type Item = Result<T>;
+    type Item = Result<V>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -352,20 +374,20 @@ where
     }
 }
 
-struct JournalMonth<T>
+struct JournalMonth<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
     month_dir: ffi::OsString,
     days: Vec<u32>,
-    day: Option<JournalDay<T>>,
+    day: Option<JournalDay<V>>,
 }
 
-impl<T> JournalMonth<T>
+impl<V> JournalMonth<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    fn new(year_dir: ffi::OsString, month: u32) -> JournalMonth<T> {
+    fn new(year_dir: ffi::OsString, month: u32) -> JournalMonth<V> {
         let month_dir = {
             let mut pp = path::PathBuf::new();
             pp.push(path::Path::new(&year_dir));
@@ -380,11 +402,11 @@ where
     }
 }
 
-impl<T> Iterator for JournalMonth<T>
+impl<V> Iterator for JournalMonth<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    type Item = Result<T>;
+    type Item = Result<V>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -409,19 +431,19 @@ where
     }
 }
 
-struct JournalDay<T>
+struct JournalDay<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
     _day_dir: ffi::OsString,
-    txns: Vec<T>,
+    txns: Vec<V>,
 }
 
-impl<T> JournalDay<T>
+impl<V> JournalDay<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    fn new(month_dir: ffi::OsString, day: u32) -> Option<JournalDay<T>> {
+    fn new(month_dir: ffi::OsString, day: u32) -> Option<JournalDay<V>> {
         let day_dir = {
             let mut pp = path::PathBuf::new();
             pp.push(path::Path::new(&month_dir));
@@ -444,7 +466,7 @@ where
         })
     }
 
-    fn new_txn(day_dir: &ffi::OsStr, item: fs::DirEntry) -> Option<T> {
+    fn new_txn(day_dir: &ffi::OsStr, item: fs::DirEntry) -> Option<V> {
         match item.file_name().to_str() {
             Some(file_name) => {
                 let file_loc = {
@@ -455,7 +477,7 @@ where
                 };
                 let data = fs::read(&file_loc).ok()?;
                 let from = std::str::from_utf8(&data).ok()?;
-                let mut value: T = Default::default();
+                let mut value: V = Default::default();
                 value.decode(from).ok()?;
                 Some(value)
             }
@@ -464,11 +486,11 @@ where
     }
 }
 
-impl<T> Iterator for JournalDay<T>
+impl<V> Iterator for JournalDay<V>
 where
-    T: Ord + Durable<Json>,
+    V: Ord + Durable<Json>,
 {
-    type Item = Result<T>;
+    type Item = Result<V>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.txns.len() {
@@ -479,19 +501,20 @@ where
 }
 
 #[derive(Clone)]
-pub enum DataFile<T>
+pub enum DataFile<V>
 where
-    T: Durable<Json>,
+    V: Durable<Json>,
 {
-    Company { file_loc: FileLoc, value: T },
-    Ledger { file_loc: FileLoc, value: T },
-    Commodity { file_loc: FileLoc, value: T },
-    Transaction { file_loc: FileLoc, value: T },
+    Workspace { file_loc: FileLoc, value: V },
+    Company { file_loc: FileLoc, value: V },
+    Ledger { file_loc: FileLoc, value: V },
+    Commodity { file_loc: FileLoc, value: V },
+    Transaction { file_loc: FileLoc, value: V },
 }
 
-impl<T> DataFile<T>
+impl<V> DataFile<V>
 where
-    T: Durable<Json>,
+    V: Durable<Json>,
 {
     pub fn create(&self) -> Result<()> {
         let value = self.to_value();
@@ -502,9 +525,10 @@ where
         Ok(())
     }
 
-    pub fn open(file_loc: FileLoc) -> Result<DataFile<T>> {
-        let value: T = file_loc.to_value()?;
+    pub fn open(file_loc: FileLoc) -> Result<DataFile<V>> {
+        let value: V = file_loc.to_value()?;
         match value.to_type().as_str() {
+            "workspace" => Ok(DataFile::Transaction { file_loc, value }),
             "company" => Ok(DataFile::Company { file_loc, value }),
             "ledger" => Ok(DataFile::Ledger { file_loc, value }),
             "commodity" => Ok(DataFile::Commodity { file_loc, value }),
@@ -513,7 +537,7 @@ where
         }
     }
 
-    pub fn update(&mut self, value: T) -> Result<T> {
+    pub fn update(&mut self, value: V) -> Result<V> {
         let js_value = value.encode()?;
 
         let old_value = self.swap_value(value);
@@ -535,6 +559,7 @@ where
 
     pub fn delete(self) -> Result<()> {
         let file_loc: ffi::OsString = match self {
+            DataFile::Workspace { file_loc, .. } => file_loc,
             DataFile::Company { file_loc, .. } => file_loc,
             DataFile::Ledger { file_loc, .. } => file_loc,
             DataFile::Commodity { file_loc, .. } => file_loc,
@@ -545,12 +570,13 @@ where
     }
 }
 
-impl<T> DataFile<T>
+impl<V> DataFile<V>
 where
-    T: Durable<Json>,
+    V: Durable<Json>,
 {
     fn to_file_loc(&self) -> ffi::OsString {
         match self {
+            DataFile::Workspace { file_loc, .. } => file_loc.0.clone(),
             DataFile::Company { file_loc, .. } => file_loc.0.clone(),
             DataFile::Ledger { file_loc, .. } => file_loc.0.clone(),
             DataFile::Commodity { file_loc, .. } => file_loc.0.clone(),
@@ -558,8 +584,9 @@ where
         }
     }
 
-    fn to_value(&self) -> T {
+    fn to_value(&self) -> V {
         match self {
+            DataFile::Workspace { value, .. } => value,
             DataFile::Company { value, .. } => value,
             DataFile::Ledger { value, .. } => value,
             DataFile::Commodity { value, .. } => value,
@@ -570,6 +597,7 @@ where
 
     fn is_old_version(&self) -> bool {
         match self {
+            DataFile::Workspace { file_loc, .. } => file_loc,
             DataFile::Company { file_loc, .. } => file_loc,
             DataFile::Ledger { file_loc, .. } => file_loc,
             DataFile::Commodity { file_loc, .. } => file_loc,
@@ -578,7 +606,7 @@ where
         .is_old_version()
     }
 
-    fn older_version(&self, other: &DataFile<T>) -> Result<Option<ffi::OsString>> {
+    fn older_version(&self, other: &DataFile<V>) -> Result<Option<ffi::OsString>> {
         if self.is_old_version() == false && other.is_old_version() == false {
             Ok(None)
         } else {
@@ -602,8 +630,9 @@ where
         }
     }
 
-    fn swap_value(&mut self, value: T) -> T {
+    fn swap_value(&mut self, value: V) -> V {
         let v_ref = match self {
+            DataFile::Workspace { value, .. } => value,
             DataFile::Company { value, .. } => value,
             DataFile::Commodity { value, .. } => value,
             DataFile::Ledger { value, .. } => value,

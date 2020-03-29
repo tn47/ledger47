@@ -1,4 +1,4 @@
-use std::{result, str::FromStr};
+use std::{fmt, result, str::FromStr};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -22,4 +22,19 @@ pub enum Error {
     IOError(String),
     InvalidDate(String),
     InvalidJson(String),
+    NoEdit(String),
+    NotFound(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        match self {
+            Error::Fatal(msg) => write!(f, "Fatal:{}", msg),
+            Error::IOError(msg) => write!(f, "IOError:{}", msg),
+            Error::InvalidDate(msg) => write!(f, "InvalidDate:{}", msg),
+            Error::InvalidJson(msg) => write!(f, "InvalidJson:{}", msg),
+            Error::NoEdit(msg) => write!(f, "NoEdit:{}", msg),
+            Error::NotFound(msg) => write!(f, "NotFound:{}", msg),
+        }
+    }
 }

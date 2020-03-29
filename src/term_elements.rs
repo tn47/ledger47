@@ -5,7 +5,7 @@ use crossterm::{
 };
 use unicode_width::UnicodeWidthChar;
 
-use std::iter::FromIterator;
+use std::{fmt, iter::FromIterator, result};
 
 use crate::term_buffer::Buffer;
 use ledger::core::{Error, Result};
@@ -45,6 +45,27 @@ impl Coordinates {
             width,
         }
     }
+
+    pub fn to_coord(&self, col_off: u16, row_off: u16, height: u16, width: u16) -> Coordinates {
+        let (col, row) = self.origin;
+        Coordinates {
+            origin: (col + col_off, row + row_off),
+            height,
+            width,
+        }
+    }
+
+    pub fn to_origin(&self) -> (u16, u16) {
+        self.origin
+    }
+
+    pub fn to_height(&self) -> u16 {
+        self.height
+    }
+
+    pub fn to_width(&self) -> u16 {
+        self.width
+    }
 }
 
 pub struct Title {
@@ -65,7 +86,7 @@ impl Title {
             .chars()
             .map(|c| c.width().unwrap_or(0))
             .sum::<usize>() as u16;
-        assert!(g_width < coord.width);
+        assert!(g_width <= coord.width, "{} {}", g_width, coord.width);
         Ok(Title {
             coord: coord.clone(),
             buffer: Buffer::new(buffer.as_bytes())?,
@@ -108,19 +129,20 @@ impl Command for Title {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
-        let mut output: String = Default::default();
-        {
-            let (col, row) = self.coord.origin;
-            output.push_str(&cursor::MoveTo(self.start, row).to_string());
-        }
-        {
-            let s = style::style(self.buffer.to_string())
-                .on(self.bg)
-                .with(self.fg)
-                .attribute(self.attr);
-            output.push_str(&s.to_string());
-        }
-        output
+        self.to_string()
+    }
+}
+
+impl fmt::Display for Title {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        let (col, row) = self.coord.origin;
+        write!(f, "{}", cursor::MoveTo(self.start, row).to_string())?;
+
+        let s = style::style(self.buffer.to_string())
+            .on(self.bg)
+            .with(self.fg)
+            .attribute(self.attr);
+        write!(f, "{}", s.to_string())
     }
 }
 
@@ -163,99 +185,51 @@ impl Command for Border {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
+        self.to_string()
+    }
+}
+
+impl fmt::Display for Border {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         use std::iter::repeat;
 
-        let mut output: String = Default::default();
         let (col, row) = self.coord.origin;
         let (ht, wd) = (self.coord.height, self.coord.width);
+        write!(f, "{}", style::SetBackgroundColor(self.bg).to_string())?;
+        write!(f, "{}", style::SetForegroundColor(self.fg).to_string())?;
+        write!(f, "{}", style::SetAttribute(self.attr).to_string())?;
 
         // top
-        {
-            output.push_str(&cursor::MoveTo(col, row).to_string());
-            output.push_str({
-                let s = String::from_iter(repeat('─').take(wd as usize));
-                &style::style(s)
-                    .on(self.bg)
-                    .with(self.fg)
-                    .attribute(self.attr)
-                    .to_string()
-            });
-        };
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(f, "{}", String::from_iter(repeat('─').take(wd as usize)))?;
         // right
-        {
-            for h in 0..ht {
-                output.push_str(&cursor::MoveTo(col + wd - 1, row + h).to_string());
-                output.push_str(
-                    &style::style('│')
-                        .on(self.bg)
-                        .with(self.fg)
-                        .attribute(self.attr)
-                        .to_string(),
-                );
-            }
-        };
+        for h in 0..ht {
+            write!(f, "{}", cursor::MoveTo(col + wd - 1, row + h).to_string())?;
+            write!(f, "│")?;
+        }
         // botton
-        {
-            output.push_str(&cursor::MoveTo(col, row + ht - 1).to_string());
-            output.push_str({
-                let s = String::from_iter(repeat('─').take(wd as usize));
-                &style::style(s)
-                    .on(self.bg)
-                    .with(self.fg)
-                    .attribute(self.attr)
-                    .to_string()
-            });
-        };
+        write!(f, "{}", cursor::MoveTo(col, row + ht - 1).to_string())?;
+        write!(f, "{}", String::from_iter(repeat('─').take(wd as usize)))?;
         // left
-        {
-            for h in 0..ht {
-                output.push_str(&cursor::MoveTo(col, row + h).to_string());
-                output.push_str(
-                    &style::style('│')
-                        .on(self.bg)
-                        .with(self.fg)
-                        .attribute(self.attr)
-                        .to_string(),
-                );
-            }
-        };
+        for h in 0..ht {
+            write!(f, "{}", cursor::MoveTo(col, row + h).to_string())?;
+            write!(f, "│")?;
+        }
         // top-left corner
-        output.push_str(&cursor::MoveTo(col, row).to_string());
-        output.push_str(
-            &style::style('╭')
-                .on(self.bg)
-                .with(self.fg)
-                .attribute(self.attr)
-                .to_string(),
-        );
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(f, "╭")?;
         // top-right corner
-        output.push_str(&cursor::MoveTo(col + wd - 1, row).to_string());
-        output.push_str(
-            &style::style('╮')
-                .on(self.bg)
-                .with(self.fg)
-                .attribute(self.attr)
-                .to_string(),
-        );
+        write!(f, "{}", cursor::MoveTo(col + wd - 1, row).to_string())?;
+        write!(f, "╮")?;
         // bottom-right corner
-        output.push_str(&cursor::MoveTo(col + wd - 1, row + ht - 1).to_string());
-        output.push_str(
-            &style::style('╯')
-                .on(self.bg)
-                .with(self.fg)
-                .attribute(self.attr)
-                .to_string(),
-        );
+        write!(
+            f,
+            "{}",
+            cursor::MoveTo(col + wd - 1, row + ht - 1).to_string()
+        )?;
+        write!(f, "╯")?;
         // bottom-left corner
-        output.push_str(&cursor::MoveTo(col, row + ht - 1).to_string());
-        output.push_str(
-            &style::style('╰')
-                .on(self.bg)
-                .with(self.fg)
-                .attribute(self.attr)
-                .to_string(),
-        );
-
-        output
+        write!(f, "{}", cursor::MoveTo(col, row + ht - 1).to_string())?;
+        write!(f, "╰")
     }
 }

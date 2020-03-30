@@ -1,6 +1,6 @@
 use crossterm::event::{self, KeyCode, KeyModifiers, MouseButton};
 
-enum Event {
+pub enum Event {
     Resize {
         cols: u16,
         rows: u16,

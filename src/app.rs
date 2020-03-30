@@ -1,63 +1,159 @@
 use crossterm::{
     cursor,
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent},
+    event::{
+        self as ct_event, DisableMouseCapture, EnableMouseCapture, Event as CtEvent, KeyCode,
+        KeyEvent, MouseEvent,
+    },
     execute,
     style::{self, Color},
     terminal,
 };
+use jsondata::Json;
 use unicode_width::UnicodeWidthStr;
 
-use std::io::{self, Write};
+use std::{
+    ffi,
+    io::{self, Write},
+    marker,
+    str::FromStr,
+};
 
+use crate::event::Event;
 use crate::term_elements as te;
 use crate::term_layers::{self as tl, Layer};
-use ledger::core::{Error, Result};
+use crate::Opt;
 
-pub struct Application<D> {
-    layers: Vec<Layer>,
-    store: D,
+use ledger::{
+    core::{Error, Result, Store},
+    db_files,
+};
+
+pub fn run(opts: Opt) -> Result<()> {
+    let dir: &ffi::OsStr = opts.dir.as_ref();
+    let store = match db_files::Db::open(dir) {
+        Ok(store) => Ok(Some(store)),
+        Err(Error::NotFound(_)) => Ok(None),
+        Err(err) => Err(err),
+    }?;
+
+    let app = match store {
+        None => Application::<db_files::Db, Json>::new_workspace()?,
+        Some(store) => todo!(),
+    };
+
+    app.event_loop()
 }
 
-pub fn run() -> Result<()> {
-    let mut tm = Terminal::init()?;
+pub struct View {
+    pub(crate) tm: Terminal,
+    pub(crate) layers: Vec<Layer>,
+}
 
-    let layer = tl::NewWorkspace::new(te::Coordinates::new(0, 0, tm.rows, tm.cols))?;
-    err_at!(Fatal, execute!(tm.stdout, layer))?;
+pub struct Application<D, T>
+where
+    D: Store<T>,
+    T: ToString + FromStr,
+{
+    view: View,
+    store: Option<D>,
 
-    loop {
-        let code = match err_at!(Fatal, event::read())? {
-            Event::Key(event) => handle_key_event(event),
-            Event::Mouse(event) => handle_mouse_event(event),
-            Event::Resize(width, height) => handle_resize(width, height),
+    _phantom_t: marker::PhantomData<T>,
+}
+
+impl<D, T> Application<D, T>
+where
+    D: Store<T>,
+    T: ToString + FromStr,
+{
+    fn new_workspace() -> Result<Application<D, T>> {
+        let mut app = Application {
+            view: View {
+                tm: Terminal::init()?,
+                layers: Default::default(),
+            },
+            store: Default::default(),
+            _phantom_t: marker::PhantomData,
         };
-        if code > 0 {
-            break Ok(());
+        let layer = tl::NewWorkspace::new_layer(&mut app.view)?;
+        app.view.layers.push(layer);
+
+        Ok(app)
+    }
+
+    fn event_loop(mut self) -> Result<()> {
+        loop {
+            let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
+            match evnt {
+                Event::Resize { cols, rows } => {
+                    self.resize(cols, rows)?.build()?.queue()?.flush();
+                }
+                Event::Key {
+                    code: KeyCode::Char('q'),
+                    modifiers,
+                } if modifiers.is_empty() => break Ok(()),
+                evnt => {
+                    self.handle_event(evnt);
+                }
+            };
         }
     }
-}
 
-fn handle_key_event(event: KeyEvent) -> u32 {
-    println!("event {:?}", event);
-    match event.code {
-        KeyCode::Char('q') => 1,
-        _ => 0,
+    fn resize(&mut self, _cols: u16, _rows: u16) -> Result<&mut Self> {
+        self.view.tm = Terminal::init()?;
+        let layers: Vec<Layer> = self.view.layers.drain(..).collect();
+        for layer in layers.into_iter() {
+            let layer = layer.resize(&mut self.view)?;
+            self.view.layers.push(layer);
+        }
+
+        Ok(self)
+    }
+
+    fn build(&mut self) -> Result<&mut Self> {
+        let mut layers: Vec<Layer> = self.view.layers.drain(..).collect();
+        for layer in layers.iter_mut() {
+            layer.build(&mut self.view)?;
+        }
+        self.view.layers = layers;
+
+        Ok(self)
+    }
+
+    fn handle_event(&mut self, mut evnt: Event) -> Result<&mut Self> {
+        let mut layers: Vec<Layer> = self.view.layers.drain(..).collect();
+        for layer in layers.iter_mut().rev() {
+            evnt = match layer.handle_event(&mut self.view, evnt)? {
+                Some(evnt) => evnt,
+                None => break,
+            }
+        }
+        self.view.layers = layers;
+
+        Ok(self)
+    }
+
+    #[inline]
+    fn queue(&mut self) -> Result<&mut Self> {
+        let mut layers: Vec<Layer> = self.view.layers.drain(..).collect();
+        for layer in layers.iter() {
+            err_at!(Fatal, execute!(self.view.tm.stdout, layer))?;
+        }
+        self.view.layers = layers;
+
+        Ok(self)
+    }
+
+    #[inline]
+    fn flush(&mut self) -> &mut Self {
+        self.view.tm.stdout.flush();
+        self
     }
 }
 
-fn handle_mouse_event(event: MouseEvent) -> u32 {
-    println!("event {:?}", event);
-    0
-}
-
-fn handle_resize(width: u16, height: u16) -> u32 {
-    println!("w:{} h:{}", width, height);
-    0
-}
-
-struct Terminal {
-    stdout: io::Stdout,
-    cols: u16,
-    rows: u16,
+pub struct Terminal {
+    pub(crate) stdout: io::Stdout,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
 }
 
 impl Terminal {

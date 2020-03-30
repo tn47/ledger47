@@ -133,10 +133,10 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn open(dir: ffi::OsString) -> Result<Db> {
-        let w_dir = path::Path::new(&dir);
+    pub fn open(dir: &ffi::OsStr) -> Result<Db> {
+        let w_dir = path::Path::new(dir);
         if w_dir.exists() {
-            let file_loc = FileLoc::from_key(&dir, "workspace");
+            let file_loc = FileLoc::from_key(dir, "workspace");
             let value: Workspace = file_loc.to_value()?;
             Ok(Db {
                 dir: w_dir.as_os_str().to_os_string(),

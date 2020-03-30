@@ -18,7 +18,20 @@ pub const BgLayer: Color = Color::AnsiValue(236);
 pub const FgTitle: Color = Color::AnsiValue(6);
 pub const FgBorder: Color = Color::AnsiValue(15);
 
-#[derive(Clone)]
+#[macro_export]
+macro_rules! impl_command {
+    ($e:ty) => {
+        impl Command for $e {
+            type AnsiType = String;
+
+            fn ansi_code(&self) -> Self::AnsiType {
+                self.to_string()
+            }
+        }
+    };
+}
+
+#[derive(Default, Clone)]
 pub struct Coordinates {
     origin: (u16, u16),
     height: u16,
@@ -56,10 +69,13 @@ impl Coordinates {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct Title {
     coord: Coordinates,
     content: String,
 }
+
+impl_command!(Title);
 
 impl Title {
     pub fn new(coord: Coordinates, content: &str) -> Result<Title> {
@@ -71,20 +87,6 @@ impl Title {
             .sum::<usize>() as u16;
         assert!(width <= coord.width, "{}/{}", width, coord.width);
         Ok(Title { coord, content })
-    }
-}
-
-impl Title {
-    fn build(&self) {
-        ()
-    }
-}
-
-impl Command for Title {
-    type AnsiType = String;
-
-    fn ansi_code(&self) -> Self::AnsiType {
-        self.to_string()
     }
 }
 
@@ -106,23 +108,18 @@ impl fmt::Display for Title {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct Border {
     coord: Coordinates,
 }
+
+impl_command!(Border);
 
 impl Border {
     pub fn new(coord: Coordinates) -> Result<Border> {
         assert!(coord.height > 2);
         assert!(coord.width > 2);
         Ok(Border { coord })
-    }
-}
-
-impl Command for Border {
-    type AnsiType = String;
-
-    fn ansi_code(&self) -> Self::AnsiType {
-        self.to_string()
     }
 }
 
@@ -167,5 +164,25 @@ impl fmt::Display for Border {
         // bottom-left corner
         write!(f, "{}", cursor::MoveTo(col, row + ht - 1).to_string())?;
         write!(f, "╰")
+    }
+}
+
+struct InputLine {
+    coord: Coordinates,
+    prefix: String,
+    buffer: Buffer,
+}
+
+// impl_command!(InputLine);
+
+impl InputLine {
+    fn new(coord: Coordinates, prefix: String) -> InputLine {
+        let bytes: Vec<u8> = vec![];
+        let buffer = Buffer::new(bytes.as_slice()).ok().unwrap().into_insert();
+        InputLine {
+            coord,
+            prefix,
+            buffer,
+        }
     }
 }

@@ -18,8 +18,8 @@ mod term_layers;
 
 #[derive(Debug, StructOpt)]
 pub struct Opt {
-    //#[structopt(long = "profile", default_value = "")]
-    //profile: String,
+    #[structopt(long = "dir", default_value = "./data")] // TODO  default dir
+    dir: String,
 
     //#[structopt(long = "seed", default_value = "0")]
     //seed: u128,
@@ -37,12 +37,11 @@ pub struct Opt {
 
     #[structopt(long = "trace")]
     trace: bool,
-
-    dir: String,
 }
 
 fn main() {
-    if let Err(err) = app::run() {
+    let opts = Opt::from_args();
+    if let Err(err) = app::run(opts) {
         println!("{}", err)
     }
 }

@@ -7,6 +7,7 @@ use unicode_width::UnicodeWidthChar;
 
 use std::{fmt, iter::FromIterator, result};
 
+use crate::app::Application;
 use crate::term_buffer::Buffer;
 use ledger::core::{Error, Result};
 
@@ -14,29 +15,8 @@ pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
 
 pub const BgLayer: Color = Color::AnsiValue(236);
-pub const BBgLayer: Color = Color::AnsiValue(236);
 pub const FgTitle: Color = Color::AnsiValue(6);
 pub const FgBorder: Color = Color::AnsiValue(15);
-
-//#[macro_export]
-//macro_rules! element_style {
-//    {$t:ty} => {
-//        impl Command for $t {
-//            type AnsiType = String;
-//
-//            fn ansi_code(&self) -> Self::AnsiType {
-//                let mut output: String = Default::default();
-//                for (col, row, item) in self.style.render(&self.buffer, self.to_view()) {
-//                    output.push_str(&cursor::MoveTo(col, row).to_string());
-//                    output.push_str(&item.to_string());
-//                }
-//                output
-//            }
-//        }
-//    };
-//}
-
-// element_style! {Title<E>}
 
 #[derive(Clone)]
 pub struct Coordinates {
@@ -78,58 +58,25 @@ impl Coordinates {
 
 pub struct Title {
     coord: Coordinates,
-    buffer: Buffer,
-    start: u16,
-    g_width: u16,
-    bg: Color,
-    fg: Color,
-    attr: Attribute,
+    content: String,
 }
 
 impl Title {
     pub fn new(coord: Coordinates, content: &str) -> Result<Title> {
         assert!(coord.height == 1);
-        let buffer = " ".to_string() + content + " ";
-        let g_width = buffer
+        let content = " ".to_string() + content + " ";
+        let width = content
             .chars()
             .map(|c| c.width().unwrap_or(0))
             .sum::<usize>() as u16;
-        assert!(g_width <= coord.width, "{} {}", g_width, coord.width);
-        Ok(Title {
-            coord: coord.clone(),
-            buffer: Buffer::new(buffer.as_bytes())?,
-            start: coord.origin.0,
-            g_width,
-            bg: Color::Black,
-            fg: Color::White,
-            attr: Attribute::Bold,
-        })
+        assert!(width <= coord.width, "{}/{}", width, coord.width);
+        Ok(Title { coord, content })
     }
+}
 
-    pub fn align(&mut self, how: &str, fill: String) -> Result<&mut Self> {
-        self.start = match how {
-            "left" => self.start,
-            "right" => self.start + self.coord.width - self.g_width,
-            "center" | "middle" => self.start + ((self.coord.width - self.g_width) / 2),
-            _ => err_at!(Fatal, msg: format!("unreachable"))?,
-        };
-
-        Ok(self)
-    }
-
-    pub fn on(&mut self, color: Color) -> &mut Self {
-        self.bg = color;
-        self
-    }
-
-    pub fn with(&mut self, color: Color) -> &mut Self {
-        self.fg = color;
-        self
-    }
-
-    pub fn attribute(&mut self, attr: Attribute) -> &mut Self {
-        self.attr = attr;
-        self
+impl Title {
+    fn build(&self) {
+        ()
     }
 }
 
@@ -144,48 +91,30 @@ impl Command for Title {
 impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.coord.origin;
-        write!(f, "{}", cursor::MoveTo(self.start, row).to_string())?;
-
-        let s = style::style(self.buffer.to_string())
-            .on(self.bg)
-            .with(self.fg)
-            .attribute(self.attr);
-        write!(f, "{}", s.to_string())
+        write!(
+            f,
+            "{}",
+            cursor::MoveTo(self.coord.origin.0, row).to_string()
+        )?;
+        write!(
+            f,
+            "{}",
+            style::style(self.content.to_string())
+                .on(BgLayer)
+                .with(FgTitle)
+        )
     }
 }
 
 pub struct Border {
     coord: Coordinates,
-    bg: Color,
-    fg: Color,
-    attr: Attribute,
 }
 
 impl Border {
     pub fn new(coord: Coordinates) -> Result<Border> {
         assert!(coord.height > 2);
         assert!(coord.width > 2);
-        Ok(Border {
-            coord,
-            bg: Color::Black,
-            fg: Color::Black,
-            attr: Attribute::Bold,
-        })
-    }
-
-    pub fn on(&mut self, color: Color) -> &mut Self {
-        self.bg = color;
-        self
-    }
-
-    pub fn with(&mut self, color: Color) -> &mut Self {
-        self.fg = color;
-        self
-    }
-
-    pub fn attribute(&mut self, attr: Attribute) -> &mut Self {
-        self.attr = attr;
-        self
+        Ok(Border { coord })
     }
 }
 
@@ -203,9 +132,8 @@ impl fmt::Display for Border {
 
         let (col, row) = self.coord.origin;
         let (ht, wd) = (self.coord.height, self.coord.width);
-        write!(f, "{}", style::SetBackgroundColor(self.bg).to_string())?;
-        write!(f, "{}", style::SetForegroundColor(self.fg).to_string())?;
-        write!(f, "{}", style::SetAttribute(self.attr).to_string())?;
+        write!(f, "{}", style::SetBackgroundColor(BgLayer).to_string())?;
+        write!(f, "{}", style::SetForegroundColor(FgBorder).to_string())?;
 
         // top
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;

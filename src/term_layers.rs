@@ -1,16 +1,20 @@
 use crossterm::{cursor, style, terminal, Command};
 use unicode_width::UnicodeWidthStr;
 
-use crate::term_elements as te;
+use crate::term_elements::{self as te};
 use ledger::core::{Error, Result};
 
-pub struct LayerNewWorkspace {
+pub enum Layer {
+    NewWorkspace(NewWorkspace),
+}
+
+pub struct NewWorkspace {
     coord: te::Coordinates,
 }
 
-impl LayerNewWorkspace {
-    pub fn new(coord: te::Coordinates) -> Result<LayerNewWorkspace> {
-        Ok(LayerNewWorkspace { coord })
+impl NewWorkspace {
+    pub fn new(coord: te::Coordinates) -> Result<NewWorkspace> {
+        Ok(NewWorkspace { coord })
     }
 
     pub fn to_url() -> String {
@@ -18,28 +22,24 @@ impl LayerNewWorkspace {
     }
 }
 
-impl Command for LayerNewWorkspace {
+impl Command for NewWorkspace {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
         let mut title = {
             let content = "create new workspace".to_string();
             let c = self.coord.to_coord(2, 0, 1, (content.width() as u16) + 2);
-            let mut t = te::Title::new(c, &content).ok().unwrap();
-            t.on(te::BgLayer).with(te::FgTitle);
-            t
+            te::Title::new(c, &content).ok().unwrap()
         };
         let mut border = {
-            let mut b = te::Border::new(te::Coordinates::new(
+            te::Border::new(te::Coordinates::new(
                 0,
                 0,
                 self.coord.to_height() - 1,
                 self.coord.to_width(),
             ))
             .ok()
-            .unwrap();
-            b.on(te::BgLayer).with(te::FgBorder);
-            b
+            .unwrap()
         };
 
         let (col, row) = self.coord.to_origin();

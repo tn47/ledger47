@@ -10,13 +10,18 @@ use unicode_width::UnicodeWidthStr;
 use std::io::{self, Write};
 
 use crate::term_elements as te;
-use crate::term_layers as tl;
+use crate::term_layers::{self as tl, Layer};
 use ledger::core::{Error, Result};
+
+pub struct Application<D> {
+    layers: Vec<Layer>,
+    store: D,
+}
 
 pub fn run() -> Result<()> {
     let mut tm = Terminal::init()?;
 
-    let layer = tl::LayerNewWorkspace::new(te::Coordinates::new(0, 0, tm.rows, tm.cols))?;
+    let layer = tl::NewWorkspace::new(te::Coordinates::new(0, 0, tm.rows, tm.cols))?;
     err_at!(Fatal, execute!(tm.stdout, layer))?;
 
     loop {

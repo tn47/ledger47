@@ -3,6 +3,7 @@ use structopt::StructOpt;
 #[macro_use]
 mod util;
 mod app;
+mod event;
 mod term_buffer;
 mod term_elements;
 mod term_layers;

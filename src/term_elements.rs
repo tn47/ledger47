@@ -10,6 +10,13 @@ use std::{fmt, iter::FromIterator, result};
 use crate::term_buffer::Buffer;
 use ledger::core::{Error, Result};
 
+pub const MIN_COL: u64 = 1;
+pub const MIN_ROW: u64 = 1;
+
+pub const BgPage: Color = Color::AnsiValue(236);
+pub const FgTitle: Color = Color::AnsiValue(6);
+pub const FgBorder: Color = Color::AnsiValue(15);
+
 //#[macro_export]
 //macro_rules! element_style {
 //    {$t:ty} => {

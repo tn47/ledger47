@@ -2,9 +2,10 @@ use structopt::StructOpt;
 
 #[macro_use]
 mod util;
-mod term;
+mod app;
 mod term_buffer;
 mod term_elements;
+mod term_pages;
 
 // commands:
 //      blinking, hide, show, enablemousecapture, disablemousecapture, clear, setsize,
@@ -40,7 +41,7 @@ pub struct Opt {
 }
 
 fn main() {
-    if let Err(err) = term::run() {
+    if let Err(err) = app::run() {
         println!("{}", err)
     }
 }

@@ -6,6 +6,7 @@ use std::io;
 use ledger::core::{Error, Result};
 
 // all bits and pieces of content in a layer/page is managed by buffer.
+#[derive(Clone)]
 pub enum Buffer {
     Normal {
         buf: Rope,
@@ -22,6 +23,17 @@ pub enum Buffer {
         window: Vec<u64>,
         cursor: (u64, u64),
     },
+}
+
+impl Default for Buffer {
+    fn default() -> Buffer {
+        let bytes: Vec<u8> = vec![];
+        Buffer::Normal {
+            buf: Rope::from_reader(bytes.as_slice()).unwrap(),
+            window: Default::default(),
+            cursor: Default::default(),
+        }
+    }
 }
 
 impl Buffer {

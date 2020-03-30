@@ -4,9 +4,9 @@ use crossterm::{
         self as ct_event, DisableMouseCapture, EnableMouseCapture, Event as CtEvent, KeyCode,
         KeyEvent, MouseEvent,
     },
-    execute,
+    execute, queue,
     style::{self, Color},
-    terminal,
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use jsondata::Json;
 use unicode_width::UnicodeWidthStr;
@@ -81,6 +81,8 @@ where
     }
 
     fn event_loop(mut self) -> Result<()> {
+        self.build()?.queue()?.flush();
+
         loop {
             let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
             match evnt {
@@ -136,7 +138,7 @@ where
     fn queue(&mut self) -> Result<&mut Self> {
         let mut layers: Vec<Layer> = self.view.layers.drain(..).collect();
         for layer in layers.iter() {
-            err_at!(Fatal, execute!(self.view.tm.stdout, layer))?;
+            err_at!(Fatal, queue!(self.view.tm.stdout, layer))?;
         }
         self.view.layers = layers;
 
@@ -160,7 +162,15 @@ impl Terminal {
     fn init() -> Result<Terminal> {
         let mut stdout = io::stdout();
         terminal::enable_raw_mode();
-        err_at!(Fatal, execute!(stdout, EnableMouseCapture, cursor::Hide))?;
+        err_at!(
+            Fatal,
+            execute!(
+                stdout,
+                EnterAlternateScreen,
+                EnableMouseCapture,
+                cursor::Hide
+            )
+        )?;
 
         let (cols, rows) = err_at!(Fatal, terminal::size())?;
         Ok(Terminal { stdout, cols, rows })
@@ -169,7 +179,12 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        execute!(self.stdout, DisableMouseCapture, cursor::Show);
+        execute!(
+            self.stdout,
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            cursor::Show
+        );
         terminal::disable_raw_mode();
     }
 }

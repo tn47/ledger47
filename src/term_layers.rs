@@ -46,6 +46,9 @@ pub struct NewWorkspace {
     coord: te::Coordinates,
     title: te::Title,
     border: te::Border,
+    ws_input_name: te::InputLine,
+    comm_head: te::TextLine,
+    comm_input_name: te::InputLine,
 }
 
 impl NewWorkspace {
@@ -59,6 +62,9 @@ impl NewWorkspace {
             coord,
             title: Default::default(),
             border: Default::default(),
+            ws_input_name: Default::default(),
+            comm_head: Default::default(),
+            comm_input_name: Default::default(),
         }))
     }
 
@@ -73,14 +79,23 @@ impl NewWorkspace {
             te::Title::new(c, &content).ok().unwrap()
         };
         self.border = {
-            te::Border::new(te::Coordinates::new(
-                0,
-                0,
-                self.coord.to_height() - 1,
-                self.coord.to_width(),
-            ))
-            .ok()
-            .unwrap()
+            let c = te::Coordinates::new(0, 0, self.coord.to_height() - 1, self.coord.to_width());
+            te::Border::new(c).ok().unwrap()
+        };
+        self.ws_input_name = {
+            let prefix = "Enter workspace name ";
+            let c = te::Coordinates::new(3, 4, 1, 60);
+            te::InputLine::new(c, prefix).ok().unwrap()
+        };
+        self.comm_head = {
+            let content = "Enter default commodity details";
+            let c = te::Coordinates::new(3, 6, 1, 60);
+            te::TextLine::new(c, content, te::FgSection).ok().unwrap()
+        };
+        self.comm_input_name = {
+            let prefix = "name :";
+            let c = te::Coordinates::new(6, 8, 1, 40);
+            te::InputLine::new(c, prefix).ok().unwrap()
         };
 
         Ok(())
@@ -103,6 +118,9 @@ impl Command for NewWorkspace {
         output.push_str(&terminal::Clear(terminal::ClearType::All).to_string());
         output.push_str(&self.border.to_string());
         output.push_str(&self.title.to_string());
+        output.push_str(&self.ws_input_name.to_string());
+        output.push_str(&self.comm_head.to_string());
+        output.push_str(&self.comm_input_name.to_string());
         output.push_str(&cursor::Hide.to_string());
 
         output

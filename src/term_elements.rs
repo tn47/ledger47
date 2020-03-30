@@ -17,6 +17,10 @@ pub const MIN_ROW: u64 = 1;
 pub const BgLayer: Color = Color::AnsiValue(236);
 pub const FgTitle: Color = Color::AnsiValue(6);
 pub const FgBorder: Color = Color::AnsiValue(15);
+pub const BgInput: Color = Color::AnsiValue(234);
+pub const FgInput: Color = Color::AnsiValue(15);
+pub const FgInputName: Color = Color::AnsiValue(15);
+pub const FgSection: Color = Color::AnsiValue(11);
 
 #[macro_export]
 macro_rules! impl_command {
@@ -93,11 +97,7 @@ impl Title {
 impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.coord.origin;
-        write!(
-            f,
-            "{}",
-            cursor::MoveTo(self.coord.origin.0, row).to_string()
-        )?;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
@@ -167,22 +167,107 @@ impl fmt::Display for Border {
     }
 }
 
-struct InputLine {
+#[derive(Default, Clone)]
+pub struct InputLine {
     coord: Coordinates,
     prefix: String,
+    n_prefix: u16,
     buffer: Buffer,
 }
 
-// impl_command!(InputLine);
+impl_command!(InputLine);
 
 impl InputLine {
-    fn new(coord: Coordinates, prefix: String) -> InputLine {
+    pub fn new(coord: Coordinates, prefix: &str) -> Result<InputLine> {
+        let n_prefix = prefix
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>() as u16;
+        assert!(n_prefix < coord.width, "{}/{}", n_prefix, coord.width);
+        assert!(coord.height == 1);
+
         let bytes: Vec<u8> = vec![];
         let buffer = Buffer::new(bytes.as_slice()).ok().unwrap().into_insert();
-        InputLine {
+        Ok(InputLine {
             coord,
-            prefix,
+            prefix: prefix.to_string(),
+            n_prefix,
             buffer,
+        })
+    }
+}
+
+impl fmt::Display for InputLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        use std::iter::repeat;
+
+        let (col, row) = self.coord.origin;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.prefix.clone())
+                .on(BgLayer)
+                .with(FgInputName)
+        );
+        write!(
+            f,
+            "{}",
+            style::style(String::from_iter(
+                repeat(' ').take((self.coord.width - self.n_prefix) as usize)
+            ))
+            .on(BgInput)
+            .with(FgInput)
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct TextLine {
+    coord: Coordinates,
+    content: String,
+    fg: Color,
+}
+
+impl Default for TextLine {
+    fn default() -> Self {
+        TextLine {
+            coord: Default::default(),
+            content: Default::default(),
+            fg: Color::White,
         }
+    }
+}
+
+impl_command!(TextLine);
+
+impl TextLine {
+    pub fn new(coord: Coordinates, content: &str, fg: Color) -> Result<TextLine> {
+        let width = content
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>() as u16;
+        assert!(width < coord.width, "{}/{}", width, coord.width);
+        assert!(coord.height == 1);
+
+        Ok(TextLine {
+            coord,
+            content: content.to_string(),
+            fg,
+        })
+    }
+}
+
+impl fmt::Display for TextLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        use std::iter::repeat;
+
+        let (col, row) = self.coord.origin;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.content.clone()).on(BgLayer).with(self.fg)
+        )
     }
 }

@@ -5,7 +5,7 @@ mod util;
 mod app;
 mod term_buffer;
 mod term_elements;
-mod term_pages;
+mod term_layers;
 
 // commands:
 //      blinking, hide, show, enablemousecapture, disablemousecapture, clear, setsize,

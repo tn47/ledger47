@@ -10,14 +10,14 @@ use unicode_width::UnicodeWidthStr;
 use std::io::{self, Write};
 
 use crate::term_elements as te;
-use crate::term_pages as tp;
+use crate::term_layers as tl;
 use ledger::core::{Error, Result};
 
 pub fn run() -> Result<()> {
     let mut tm = Terminal::init()?;
 
-    let page = tp::PageNewWorkspace::new(te::Coordinates::new(0, 0, tm.rows, tm.cols))?;
-    err_at!(Fatal, execute!(tm.stdout, page))?;
+    let layer = tl::LayerNewWorkspace::new(te::Coordinates::new(0, 0, tm.rows, tm.cols))?;
+    err_at!(Fatal, execute!(tm.stdout, layer))?;
 
     loop {
         let code = match err_at!(Fatal, event::read())? {

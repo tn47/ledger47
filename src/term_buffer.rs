@@ -5,7 +5,7 @@ use std::io;
 
 use ledger::core::{Error, Result};
 
-// all bits and pieces of content in a page is managed by buffer.
+// all bits and pieces of content in a layer/page is managed by buffer.
 pub enum Buffer {
     Normal {
         buf: Rope,

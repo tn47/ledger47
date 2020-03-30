@@ -13,7 +13,8 @@ use ledger::core::{Error, Result};
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
 
-pub const BgPage: Color = Color::AnsiValue(236);
+pub const BgLayer: Color = Color::AnsiValue(236);
+pub const BBgLayer: Color = Color::AnsiValue(236);
 pub const FgTitle: Color = Color::AnsiValue(6);
 pub const FgBorder: Color = Color::AnsiValue(15);
 

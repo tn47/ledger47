@@ -4,13 +4,13 @@ use unicode_width::UnicodeWidthStr;
 use crate::term_elements as te;
 use ledger::core::{Error, Result};
 
-pub struct PageNewWorkspace {
+pub struct LayerNewWorkspace {
     coord: te::Coordinates,
 }
 
-impl PageNewWorkspace {
-    pub fn new(coord: te::Coordinates) -> Result<PageNewWorkspace> {
-        Ok(PageNewWorkspace { coord })
+impl LayerNewWorkspace {
+    pub fn new(coord: te::Coordinates) -> Result<LayerNewWorkspace> {
+        Ok(LayerNewWorkspace { coord })
     }
 
     pub fn to_url() -> String {
@@ -18,7 +18,7 @@ impl PageNewWorkspace {
     }
 }
 
-impl Command for PageNewWorkspace {
+impl Command for LayerNewWorkspace {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
@@ -26,7 +26,7 @@ impl Command for PageNewWorkspace {
             let content = "create new workspace".to_string();
             let c = self.coord.to_coord(2, 0, 1, (content.width() as u16) + 2);
             let mut t = te::Title::new(c, &content).ok().unwrap();
-            t.on(te::BgPage).with(te::FgTitle);
+            t.on(te::BgLayer).with(te::FgTitle);
             t
         };
         let mut border = {
@@ -38,7 +38,7 @@ impl Command for PageNewWorkspace {
             ))
             .ok()
             .unwrap();
-            b.on(te::BgPage).with(te::FgBorder);
+            b.on(te::BgLayer).with(te::FgBorder);
             b
         };
 
@@ -46,7 +46,7 @@ impl Command for PageNewWorkspace {
         let mut output: String = Default::default();
 
         output.push_str(&cursor::MoveTo(col, row).to_string());
-        output.push_str(&style::SetBackgroundColor(te::BgPage).to_string());
+        output.push_str(&style::SetBackgroundColor(te::BgLayer).to_string());
         output.push_str(&terminal::Clear(terminal::ClearType::All).to_string());
         output.push_str(&border.to_string());
         output.push_str(&title.to_string());

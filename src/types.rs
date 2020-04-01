@@ -154,7 +154,7 @@ impl Durable<Json> for Commodity {
         let value: Json = err_at!(InvalidJson, from.parse())?;
 
         self.name = json_to_native_string!(value, "/name", "commodity-name")?;
-        self.value = match err_at!(InvalidJson, value.get("/value"))?.float() {
+        self.value = match err_at!(InvalidJson, value.get("/value"))?.to_float() {
             Some(f) => f,
             None => err_at!(InvalidJson, msg: format!("expected float"))?,
         };
@@ -524,14 +524,14 @@ impl Durable<Json> for Transaction {
             err_at!(InvalidJson, created.parse())?
         };
 
-        match err_at!(InvalidJson, value.get("/creditors"))?.array() {
+        match err_at!(InvalidJson, value.get("/creditors"))?.to_array() {
             Some(cs) => {
                 for c in cs.into_iter() {
                     let ledger = json_to_native_string!(c, "/ledger", "transaction-creditor")?;
                     let name =
                         json_to_native_string!(c, "/commodity/name", "transaction-creditor")?;
                     let value = err_at!(InvalidJson, c.get("/commodity/value"))?
-                        .float()
+                        .to_float()
                         .unwrap();
                     self.creditors.push(Creditor {
                         ledger,
@@ -541,14 +541,14 @@ impl Durable<Json> for Transaction {
             }
             None => return Err(Error::InvalidJson(format!("transaction-creditors"))),
         }
-        match err_at!(InvalidJson, value.get("/debitors"))?.array() {
+        match err_at!(InvalidJson, value.get("/debitors"))?.to_array() {
             Some(ds) => {
                 for d in ds.into_iter() {
                     let ledger = json_to_native_string!(d, "/ledger", "transaction-creditor")?;
                     let name =
                         json_to_native_string!(d, "/commodity/name", "transaction-creditor")?;
                     let value = err_at!(InvalidJson, d.get("/commodity/value"))?
-                        .float()
+                        .to_float()
                         .unwrap();
                     self.debitors.push(Debitor {
                         ledger,

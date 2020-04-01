@@ -36,8 +36,8 @@ macro_rules! native_to_json_string_array {
 #[macro_export]
 macro_rules! json_to_native_string {
     ($j:expr, $key:expr, $msg:expr) => {
-        match err_at!(InvalidJson, $j.get($key), $msg)?.string() {
-            Some(val) => Ok(val),
+        match err_at!(InvalidJson, $j.get($key), $msg)?.as_str() {
+            Some(val) => Ok(val.to_string()),
             None => err_at!(InvalidJson, msg: $msg),
         }
     };
@@ -46,12 +46,12 @@ macro_rules! json_to_native_string {
 #[macro_export]
 macro_rules! json_to_native_string_array {
     ($j:expr, $key:expr, $msg:expr) => {
-        match err_at!(InvalidJson, $j.get($key), $msg)?.array() {
+        match err_at!(InvalidJson, $j.get($key), $msg)?.to_array() {
             Some(val) => {
                 let mut arr = vec![];
                 for j in val.into_iter() {
-                    match j.string() {
-                        Some(s) => arr.push(s),
+                    match j.as_str() {
+                        Some(s) => arr.push(s.to_string()),
                         None => err_at!(InvalidJson, msg: $msg)?,
                     }
                 }

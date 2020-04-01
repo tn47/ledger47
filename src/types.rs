@@ -1,12 +1,12 @@
 use chrono::{self, Datelike};
-use jsondata::{Json, Property};
+use jsondata::{Json, JsonSerialize, Property};
 use uuid;
 
-use std::cmp;
+use std::{cmp, convert::TryInto};
 
 use crate::core::{Durable, Error, Result};
 
-#[derive(Clone)]
+#[derive(Clone, JsonSerialize)]
 pub struct Workspace {
     name: String,
 }
@@ -47,21 +47,17 @@ impl Durable<Json> for Workspace {
     }
 
     fn encode(&self) -> Result<Json> {
-        let value = Json::Object(vec![Property::new("name", Json::String(self.name.clone()))]);
-
-        Ok(value)
+        Ok(err_at!(ConvertFail, self.clone().try_into())?)
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
-        let value: Json = err_at!(InvalidJson, from.parse())?;
-
-        self.name = json_to_native_string!(value, "/name", "workspace-name")?;
-
+        let jval: Json = err_at!(InvalidJson, from.parse())?;
+        *self = err_at!(InvalidJson, jval.try_into())?;
         Ok(())
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, JsonSerialize)]
 pub struct Commodity {
     name: String,
     value: f64,
@@ -138,29 +134,12 @@ impl Durable<Json> for Commodity {
     }
 
     fn encode(&self) -> Result<Json> {
-        let tags: Vec<Json> = native_to_json_string_array!(self.tags.clone());
-
-        let value = Json::Object(vec![
-            Property::new("name", Json::String(self.name.clone())),
-            Property::new("value", Json::new(self.value)),
-            Property::new("tags", Json::Array(tags)),
-            Property::new("note", Json::String(self.note.clone())),
-        ]);
-
-        Ok(value)
+        Ok(err_at!(ConvertFail, self.clone().try_into())?)
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
-        let value: Json = err_at!(InvalidJson, from.parse())?;
-
-        self.name = json_to_native_string!(value, "/name", "commodity-name")?;
-        self.value = match err_at!(InvalidJson, value.get("/value"))?.to_float() {
-            Some(f) => f,
-            None => err_at!(InvalidJson, msg: format!("expected float"))?,
-        };
-        self.tags = json_to_native_string_array!(value, "/tags", "commodity-tags")?;
-        self.note = json_to_native_string!(value, "/note", "commodity-note")?;
-
+        let jval: Json = err_at!(InvalidJson, from.parse())?;
+        *self = err_at!(InvalidJson, jval.try_into())?;
         Ok(())
     }
 }

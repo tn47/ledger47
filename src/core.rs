@@ -41,6 +41,7 @@ pub enum Error {
     InvalidDate(String),
     InvalidJson(String),
     InvalidFile(String),
+    ConvertFail(String),
     NoEdit(String),
     NotFound(String),
 }
@@ -54,6 +55,7 @@ impl fmt::Display for Error {
             Error::InvalidDate(msg) => write!(f, "InvalidDate:{}", msg),
             Error::InvalidJson(msg) => write!(f, "InvalidJson:{}", msg),
             Error::InvalidFile(msg) => write!(f, "InvalidFile:{}", msg),
+            Error::ConvertFail(msg) => write!(f, "ConvertFail:{}", msg),
             Error::NoEdit(msg) => write!(f, "NoEdit:{}", msg),
             Error::NotFound(msg) => write!(f, "NotFound:{}", msg),
         }

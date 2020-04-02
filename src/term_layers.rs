@@ -102,7 +102,7 @@ where
         NewWorkspace::new_layer(app)
     }
 
-    pub fn build(&mut self, app: &Application<D, T>) -> Result<()> {
+    pub fn build(&mut self, _app: &Application<D, T>) -> Result<()> {
         self.title = {
             let content = "Create new workspace".to_string();
             let vp = {

@@ -49,8 +49,9 @@ where
     T: ToString + FromStr,
 {
     tm: Terminal,
+    vp: te::Viewport,
     layers: Vec<Layer<D, T>>,
-    // status: te::StatusLine,
+    status: te::StatusLine,
     // cmd: te::CmdLine,
     focus: ViewFocus,
 }
@@ -60,9 +61,28 @@ where
     D: Store<T>,
     T: ToString + FromStr,
 {
+    pub fn new() -> Result<View<D, T>> {
+        let tm = Terminal::init()?;
+        let vp = te::Viewport::new(1, 1, tm.cols, tm.rows - 1);
+        let status = {
+            let coord = te::Coordinates::new(
+                vp.clone()
+                    .move_to(1, vp.to_bottom() - 1)
+                    .resize_to(1, tm.cols),
+            );
+            te::StatusLine::new(coord)?
+        };
+        Ok(View {
+            tm,
+            vp,
+            layers: Default::default(),
+            status,
+            focus: ViewFocus::Layer,
+        })
+    }
+
     pub fn to_viewport(&self) -> te::Viewport {
-        let (cols, rows) = (self.tm.cols, self.tm.rows);
-        te::Viewport::new(1, 1, rows, cols)
+        self.vp.clone()
     }
 }
 
@@ -82,11 +102,7 @@ where
 {
     fn new_workspace() -> Result<Application<D, T>> {
         let mut app = Application {
-            view: View {
-                tm: Terminal::init()?,
-                layers: Default::default(),
-                focus: ViewFocus::Layer,
-            },
+            view: View::new()?,
             store: Default::default(),
         };
         let layer = tl::NewWorkspace::new_layer(&mut app)?;
@@ -97,11 +113,7 @@ where
 
     fn new() -> Result<Application<D, T>> {
         let mut app = Application {
-            view: View {
-                tm: Terminal::init()?,
-                layers: Default::default(),
-                focus: ViewFocus::Layer,
-            },
+            view: View::new()?,
             store: Default::default(),
         };
         // TODO: change this to different view.

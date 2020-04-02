@@ -25,6 +25,7 @@ pub const BG_INPUT: Color = Color::AnsiValue(234);
 pub const FG_INPUT: Color = Color::AnsiValue(15);
 pub const FG_INPUT_NAME: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
+pub const FG_STATUS: Color = Color::AnsiValue(15);
 
 #[macro_export]
 macro_rules! impl_command {
@@ -58,7 +59,7 @@ impl Element {
 }
 
 #[derive(Clone, Default)]
-pub struct Viewport(u16, u16, u16, u16); // (col, row, height, width)
+pub struct Viewport(u16, u16, u16, u16);
 
 impl Viewport {
     #[inline]
@@ -350,6 +351,8 @@ pub struct TextLine {
     fg: Color,
 }
 
+impl_command!(TextLine);
+
 impl Default for TextLine {
     fn default() -> Self {
         TextLine {
@@ -359,8 +362,6 @@ impl Default for TextLine {
         }
     }
 }
-
-impl_command!(TextLine);
 
 impl TextLine {
     pub fn new(coord: Coordinates, content: &str, fg: Color) -> Result<TextLine> {
@@ -386,42 +387,50 @@ impl fmt::Display for TextLine {
     }
 }
 
-//#[derive(Clone)]
-//pub struct StatusLine {
-//    coord: Coordinates,
-//    content: String,
-//}
-//
-//impl Default for StatusLine {
-//    fn default() -> Self {
-//        StatusLine {
-//            coord: Default::default(),
-//            content: Default::default(),
-//        }
-//    }
-//}
-//
-//impl_command!(StatusLine);
-//
-//impl StatusLine {
-//    pub fn new(coord: Coordinates) -> Result<StatusLine> {
-//        Ok(StatusLine {
-//            coord,
-//            content: Default::default(),
-//        })
-//    }
-//}
-//
-//impl fmt::Display for TextLine {
-//    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-//        use std::iter::repeat;
-//
-//        let (col, row) = self.coord.origin;
-//        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-//        write!(
-//            f,
-//            "{}",
-//            style::style(self.content.clone()).on(BG_LAYER).with(self.fg)
-//        )
-//    }
-//}
+#[derive(Default, Clone)]
+pub struct StatusLine {
+    coord: Coordinates,
+    line: String,
+}
+
+impl_command!(StatusLine);
+
+impl StatusLine {
+    pub fn new(coord: Coordinates) -> Result<StatusLine> {
+        use std::iter::repeat;
+
+        let s = {
+            let (_, width) = coord.to_viewport().to_size();
+            String::from_iter(repeat('─').take((width - 11) as usize))
+        };
+        let line = format!("{} {}", s, chrono::Local::now().format("%d-%b-%y"));
+        Ok(StatusLine { coord, line })
+    }
+
+    pub fn println(&mut self, s: String) {
+        let (_, width) = self.coord.to_viewport().to_size();
+        let (mut w, w1) = (width - 11, (width - 11) as usize);
+        let s = String::from_iter(s.chars().rev().take_while(|ch| {
+            w -= ch.width().unwrap() as u16;
+            w > 0
+        }));
+        self.line = format!(
+            "{:width$} {}",
+            s,
+            chrono::Local::now().format("%d-%b-%y"),
+            width = w1,
+        );
+    }
+}
+
+impl fmt::Display for StatusLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        let (col, row) = self.coord.to_viewport().to_origin();
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.line.clone()).on(BG_LAYER).with(FG_STATUS)
+        )
+    }
+}

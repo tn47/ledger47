@@ -147,7 +147,7 @@ impl Buffer {
 }
 
 impl Buffer {
-    pub fn handle_event(&mut self, event: &Event) -> Result<()> {
+    pub fn handle_event(&mut self, _event: &Event) -> Result<()> {
         todo!()
     }
 }

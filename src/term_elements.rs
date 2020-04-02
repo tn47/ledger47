@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    style::{self, Attribute, Color},
+    style::{self, Color},
     Command,
 };
 use unicode_width::UnicodeWidthChar;
@@ -12,20 +12,19 @@ use std::{
     result,
 };
 
-use crate::app::Application;
 use crate::term_buffer::Buffer;
-use ledger::core::{Error, Result};
+use ledger::core::Result;
 
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
 
-pub const BgLayer: Color = Color::AnsiValue(236);
-pub const FgTitle: Color = Color::AnsiValue(6);
-pub const FgBorder: Color = Color::AnsiValue(15);
-pub const BgInput: Color = Color::AnsiValue(234);
-pub const FgInput: Color = Color::AnsiValue(15);
-pub const FgInputName: Color = Color::AnsiValue(15);
-pub const FgSection: Color = Color::AnsiValue(11);
+pub const BG_LAYER: Color = Color::AnsiValue(236);
+pub const FG_TITLE: Color = Color::AnsiValue(6);
+pub const FG_BORDER: Color = Color::AnsiValue(15);
+pub const BG_INPUT: Color = Color::AnsiValue(234);
+pub const FG_INPUT: Color = Color::AnsiValue(15);
+pub const FG_INPUT_NAME: Color = Color::AnsiValue(15);
+pub const FG_SECTION: Color = Color::AnsiValue(11);
 
 #[macro_export]
 macro_rules! impl_command {
@@ -113,16 +112,30 @@ impl Viewport {
     }
 
     #[inline]
-    pub fn move_by(&mut self, col: u16, row: u16) -> &mut Self {
-        self.0 += col;
-        self.1 += row;
+    pub fn move_to(mut self, col: u16, row: u16) -> Self {
+        self.0 = col;
+        self.1 = row;
         self
     }
 
     #[inline]
-    pub fn resize(&mut self, height: u16, width: u16) -> &mut Self {
+    pub fn move_by(mut self, col_off: i16, row_off: i16) -> Self {
+        self.0 = ((self.0 as i16) + col_off) as u16;
+        self.1 = ((self.1 as i16) + row_off) as u16;
+        self
+    }
+
+    #[inline]
+    pub fn resize_to(mut self, height: u16, width: u16) -> Self {
         self.2 = height;
         self.3 = width;
+        self
+    }
+
+    #[inline]
+    pub fn resize_by(mut self, height_off: i16, width_off: i16) -> Self {
+        self.2 = ((self.2 as i16) + height_off) as u16;
+        self.3 = ((self.3 as i16) + width_off) as u16;
         self
     }
 }
@@ -158,7 +171,7 @@ impl Coordinates {
 
     pub fn cursor_move_to(&mut self, col: u16, row: u16) -> (u16, u16) {
         match self.cursor {
-            Some((ccol, crow)) => {
+            Some((_, _)) => {
                 let (ccol, rcol) = if self.vp.col_range().contains(&col) {
                     (col, 0)
                 } else {
@@ -167,7 +180,7 @@ impl Coordinates {
                 let (crow, rrow) = if self.vp.row_range().contains(&row) {
                     (row, 0)
                 } else {
-                    let crow = (self.vp.to_bottom() - self.scroll_off);
+                    let crow = self.vp.to_bottom() - self.scroll_off;
                     (crow, row - crow)
                 };
                 self.cursor = Some((ccol, crow));
@@ -196,10 +209,6 @@ impl_command!(Title);
 impl Title {
     pub fn new(coord: Coordinates, content: &str) -> Result<Title> {
         let content = " ".to_string() + content + " ";
-        let width = content
-            .chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum::<usize>() as u16;
         Ok(Title { coord, content })
     }
 }
@@ -207,12 +216,14 @@ impl Title {
 impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.coord.to_viewport().to_origin();
-        write!(f, "{}", cursor::Hide);
+        write!(f, "{}", cursor::Hide)?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
-            style::style(self.content.clone()).on(BgLayer).with(FgTitle)
+            style::style(self.content.clone())
+                .on(BG_LAYER)
+                .with(FG_TITLE)
         )
     }
 }
@@ -236,10 +247,10 @@ impl fmt::Display for Border {
 
         let (col, row) = self.coord.to_viewport().to_origin();
         let (ht, wd) = self.coord.to_viewport().to_size();
-        write!(f, "{}", style::SetBackgroundColor(BgLayer).to_string())?;
-        write!(f, "{}", style::SetForegroundColor(FgBorder).to_string())?;
+        write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
+        write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
 
-        write!(f, "{}", cursor::Hide);
+        write!(f, "{}", cursor::Hide)?;
 
         // top
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
@@ -311,23 +322,23 @@ impl fmt::Display for InputLine {
         let (col, row) = self.coord.to_viewport().to_origin();
         let (_, width) = self.coord.to_viewport().to_size();
 
-        write!(f, "{}", cursor::Hide);
+        write!(f, "{}", cursor::Hide)?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
             style::style(self.prefix.clone())
-                .on(BgLayer)
-                .with(FgInputName)
-        );
+                .on(BG_LAYER)
+                .with(FG_INPUT_NAME)
+        )?;
         write!(
             f,
             "{}",
             style::style(String::from_iter(
                 repeat(' ').take((width - self.n_prefix) as usize)
             ))
-            .on(BgInput)
-            .with(FgInput)
+            .on(BG_INPUT)
+            .with(FG_INPUT)
         )
     }
 }
@@ -353,11 +364,6 @@ impl_command!(TextLine);
 
 impl TextLine {
     pub fn new(coord: Coordinates, content: &str, fg: Color) -> Result<TextLine> {
-        let width = content
-            .chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum::<usize>() as u16;
-
         Ok(TextLine {
             coord,
             content: content.to_string(),
@@ -368,14 +374,14 @@ impl TextLine {
 
 impl fmt::Display for TextLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        use std::iter::repeat;
-
         let (col, row) = self.coord.to_viewport().to_origin();
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
-            style::style(self.content.clone()).on(BgLayer).with(self.fg)
+            style::style(self.content.clone())
+                .on(BG_LAYER)
+                .with(self.fg)
         )
     }
 }
@@ -415,7 +421,7 @@ impl fmt::Display for TextLine {
 //        write!(
 //            f,
 //            "{}",
-//            style::style(self.content.clone()).on(BgLayer).with(self.fg)
+//            style::style(self.content.clone()).on(BG_LAYER).with(self.fg)
 //        )
 //    }
 //}

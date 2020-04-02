@@ -89,13 +89,13 @@ where
                 Event::Resize { cols, rows } => {
                     self.resize(cols, rows)?.build()?.queue()?.flush();
                 }
-                Event::Key {
-                    code: KeyCode::Char('q'),
-                    modifiers,
-                } if modifiers.is_empty() => break Ok(()),
-                evnt => {
-                    self.handle_event(evnt);
-                }
+                evnt => match self.handle_event(evnt)? {
+                    Some(Event::Key {
+                        code: KeyCode::Char('q'),
+                        modifiers,
+                    }) if modifiers.is_empty() => break Ok(()),
+                    _ => (),
+                },
             };
         }
     }
@@ -121,17 +121,20 @@ where
         Ok(self)
     }
 
-    fn handle_event(&mut self, mut evnt: Event) -> Result<&mut Self> {
+    fn handle_event(&mut self, mut evnt: Event) -> Result<Option<Event>> {
         let mut layers: Vec<Layer> = self.view.layers.drain(..).collect();
-        for layer in layers.iter_mut().rev() {
-            evnt = match layer.handle_event(&mut self.view, evnt)? {
-                Some(evnt) => evnt,
-                None => break,
+        let mut iter = layers.iter_mut().rev();
+        loop {
+            if let Some(layer) = iter.next() {
+                evnt = match layer.handle_event(&mut self.view, evnt)? {
+                    Some(evnt) => evnt,
+                    None => break Ok(None),
+                }
+            } else {
+                self.view.layers = layers;
+                break Ok(Some(evnt));
             }
         }
-        self.view.layers = layers;
-
-        Ok(self)
     }
 
     #[inline]

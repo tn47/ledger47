@@ -83,7 +83,7 @@ impl NewWorkspace {
             te::Border::new(c).ok().unwrap()
         };
         self.ws_input_name = {
-            let prefix = "Enter workspace name ";
+            let prefix = "Enter workspace name :";
             let c = te::Coordinates::new(3, 4, 1, 60);
             te::InputLine::new(c, prefix).ok().unwrap()
         };

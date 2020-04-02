@@ -57,7 +57,7 @@ impl NewWorkspace {
     }
 
     pub fn new_layer(view: &mut View) -> Result<Layer> {
-        let coord = te::Coordinates::new(0, 0, view.tm.rows, view.tm.cols);
+        let coord = te::Coordinates::new(te::Viewport::new(0, 0, view.tm.rows, view.tm.cols));
         Ok(Layer::NewWorkspace(NewWorkspace {
             coord,
             title: Default::default(),
@@ -75,27 +75,33 @@ impl NewWorkspace {
     pub fn build(&mut self, _view: &View) -> Result<()> {
         self.title = {
             let content = "Create new workspace".to_string();
-            let c = self.coord.to_coord(2, 0, 1, (content.width() as u16) + 2);
-            te::Title::new(c, &content).ok().unwrap()
+            let mut vp = self.coord.to_viewport();
+            vp.move_by(2, 0).resize(1, (content.width() as u16) + 2);
+            te::Title::new(te::Coordinates::new(vp), &content)
+                .ok()
+                .unwrap()
         };
         self.border = {
-            let c = te::Coordinates::new(0, 0, self.coord.to_height() - 1, self.coord.to_width());
-            te::Border::new(c).ok().unwrap()
+            let (height, width) = self.coord.to_viewport().to_size();
+            let coord = te::Coordinates::new(te::Viewport::new(0, 0, height - 1, width));
+            te::Border::new(coord).ok().unwrap()
         };
         self.ws_input_name = {
             let prefix = "Enter workspace name :";
-            let c = te::Coordinates::new(3, 4, 1, 60);
-            te::InputLine::new(c, prefix).ok().unwrap()
+            let coord = te::Coordinates::new(te::Viewport::new(3, 4, 1, 60));
+            te::InputLine::new(coord, prefix).ok().unwrap()
         };
         self.comm_head = {
             let content = "Enter default commodity details";
-            let c = te::Coordinates::new(3, 6, 1, 60);
-            te::TextLine::new(c, content, te::FgSection).ok().unwrap()
+            let coord = te::Coordinates::new(te::Viewport::new(3, 6, 1, 60));
+            te::TextLine::new(coord, content, te::FgSection)
+                .ok()
+                .unwrap()
         };
         self.comm_input_name = {
             let prefix = "name :";
-            let c = te::Coordinates::new(6, 8, 1, 40);
-            te::InputLine::new(c, prefix).ok().unwrap()
+            let coord = te::Coordinates::new(te::Viewport::new(6, 8, 1, 40));
+            te::InputLine::new(coord, prefix).ok().unwrap()
         };
 
         Ok(())
@@ -110,7 +116,7 @@ impl Command for NewWorkspace {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
-        let (col, row) = self.coord.to_origin();
+        let (col, row) = self.coord.to_viewport().to_origin();
         let mut output: String = Default::default();
 
         output.push_str(&cursor::MoveTo(col, row).to_string());

@@ -102,7 +102,7 @@ where
         NewWorkspace::new_layer(app)
     }
 
-    pub fn build(&mut self, _app: &Application<D, T>) -> Result<()> {
+    pub fn build(&mut self, app: &mut Application<D, T>) -> Result<()> {
         self.title = {
             let content = "Create new workspace".to_string();
             let vp = {
@@ -113,10 +113,7 @@ where
                 .ok()
                 .unwrap()
         };
-        self.border = {
-            let coord = te::Coordinates::new(self.coord.to_viewport().resize_by(-1, 0));
-            te::Border::new(coord).ok().unwrap()
-        };
+        self.border = { te::Border::new(self.coord.clone()).ok().unwrap() };
         self.ws_input_name = {
             let prefix = "Enter workspace name :";
             let coord = {

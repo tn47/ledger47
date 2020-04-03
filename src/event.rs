@@ -1,5 +1,7 @@
 use crossterm::event::{self, KeyCode, KeyModifiers, MouseButton};
 
+use std::{fmt, result};
+
 pub enum Event {
     Resize {
         cols: u16,
@@ -37,6 +39,45 @@ pub enum Event {
         row: u16,
         modifiers: KeyModifiers,
     },
+}
+
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        match self {
+            Event::Resize { cols, rows } => write!(f, "resize cols:{} rows:{}", cols, rows),
+            Event::Key { code, modifiers } => {
+                write!(f, "key code:{:?} modifier:{:?}", code, modifiers)
+            }
+            Event::MouseDown {
+                button,
+                col,
+                row,
+                modifiers,
+            } => write!(f, "mousedown col:{} row:{}", col, row),
+            Event::MouseUp {
+                button,
+                col,
+                row,
+                modifiers,
+            } => write!(f, "mouseup col:{} row:{}", col, row),
+            Event::MouseDrag {
+                button,
+                col,
+                row,
+                modifiers,
+            } => write!(f, "mousedrag col:{} row:{}", col, row),
+            Event::MouseScrollDown {
+                col,
+                row,
+                modifiers,
+            } => write!(f, "mouse_scrolldowncol:{} row:{}", col, row),
+            Event::MouseScrollUp {
+                col,
+                row,
+                modifiers,
+            } => write!(f, "mouse_scrollup col:{} row:{}", col, row),
+        }
+    }
 }
 
 impl From<event::Event> for Event {

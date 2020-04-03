@@ -58,8 +58,15 @@ impl Element {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Viewport(u16, u16, u16, u16);
+
+impl fmt::Display for Viewport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        let (c, r, h, w) = (self.0, self.1, self.2, self.3);
+        write!(f, "Viewport<col:{} row:{} height:{} width:{}>", c, r, h, w)
+    }
+}
 
 impl Viewport {
     #[inline]
@@ -218,7 +225,7 @@ impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.coord.to_viewport().to_origin();
         write!(f, "{}", cursor::Hide)?;
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
         write!(
             f,
             "{}",
@@ -246,7 +253,10 @@ impl fmt::Display for Border {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         use std::iter::repeat;
 
-        let (col, row) = self.coord.to_viewport().to_origin();
+        let (col, row) = {
+            let (c, r) = self.coord.to_viewport().to_origin();
+            (c - 1, r - 1)
+        };
         let (ht, wd) = self.coord.to_viewport().to_size();
         write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
         write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
@@ -404,16 +414,18 @@ impl StatusLine {
             String::from_iter(repeat('─').take((width - 11) as usize))
         };
         let line = format!("{} {}", s, chrono::Local::now().format("%d-%b-%y"));
+        println!("{:?}", coord.to_viewport().to_origin());
         Ok(StatusLine { coord, line })
     }
 
-    pub fn println(&mut self, s: String) {
+    pub fn log(&mut self, msg: &str) {
         let (_, width) = self.coord.to_viewport().to_size();
         let (mut w, w1) = (width - 11, (width - 11) as usize);
-        let s = String::from_iter(s.chars().rev().take_while(|ch| {
+        let s = String::from_iter(msg.chars().rev().take_while(|ch| {
             w -= ch.width().unwrap() as u16;
             w > 0
         }));
+
         self.line = format!(
             "{:width$} {}",
             s,

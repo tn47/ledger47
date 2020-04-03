@@ -5,6 +5,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use jsondata::Json;
+use log::{debug, info, trace};
 
 use std::{
     ffi,
@@ -31,7 +32,7 @@ pub fn run(opts: Opt) -> Result<()> {
     }?;
 
     let app = match store {
-        None => Application::<db_files::Db, Json>::new_workspace()?,
+        None => Application::<db_files::Db, Json>::new_workspace(dir.to_os_string())?,
         Some(_store) => todo!(),
     };
 
@@ -62,16 +63,15 @@ where
     T: ToString + FromStr,
 {
     pub fn new() -> Result<View<D, T>> {
-        let tm = Terminal::init()?;
-        let vp = te::Viewport::new(1, 1, tm.cols, tm.rows - 1);
+        let tm = err_at!(Fatal, Terminal::init())?;
+        let vp = te::Viewport::new(1, 1, tm.rows - 1, tm.cols);
         let status = {
-            let coord = te::Coordinates::new(
-                vp.clone()
-                    .move_to(1, vp.to_bottom() - 1)
-                    .resize_to(1, tm.cols),
-            );
-            te::StatusLine::new(coord)?
+            let vp = vp.clone().move_to(1, vp.to_bottom()).resize_to(1, tm.cols);
+            te::StatusLine::new(te::Coordinates::new(vp))?
         };
+
+        debug!("App view-port {}", vp);
+
         Ok(View {
             tm,
             vp,
@@ -81,6 +81,7 @@ where
         })
     }
 
+    #[inline]
     pub fn to_viewport(&self) -> te::Viewport {
         self.vp.clone()
     }
@@ -91,6 +92,7 @@ where
     D: Store<T>,
     T: ToString + FromStr,
 {
+    dir: ffi::OsString,
     view: View<D, T>,
     store: Option<D>,
 }
@@ -100,19 +102,23 @@ where
     D: Store<T>,
     T: ToString + FromStr,
 {
-    fn new_workspace() -> Result<Application<D, T>> {
+    fn new_workspace(dir: ffi::OsString) -> Result<Application<D, T>> {
         let mut app = Application {
+            dir: dir.clone(),
             view: View::new()?,
             store: Default::default(),
         };
         let layer = tl::NewWorkspace::new_layer(&mut app)?;
         app.view.layers.push(layer);
 
+        info!("New workspace dir:{:?}", dir);
+
         Ok(app)
     }
 
-    fn new() -> Result<Application<D, T>> {
+    fn new(dir: ffi::OsString) -> Result<Application<D, T>> {
         let mut app = Application {
+            dir: dir.clone(),
             view: View::new()?,
             store: Default::default(),
         };
@@ -120,14 +126,21 @@ where
         let layer = tl::NewWorkspace::new_layer(&mut app)?;
         app.view.layers.push(layer);
 
+        info!("Open workspace dir:{:?}", dir);
+
         Ok(app)
     }
 
     fn event_loop(mut self) -> Result<()> {
         self.build()?.queue()?.flush()?;
+        self.status_log("");
 
         loop {
             let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
+            self.status_log("");
+
+            trace!("Event <- {}", evnt);
+
             match evnt {
                 Event::Resize { cols, rows } => {
                     self.resize(cols, rows)?.build()?.queue()?.flush()?;
@@ -190,6 +203,15 @@ where
         Ok(self)
     }
 
+    pub fn status_log(&mut self, msg: &str) -> Result<()> {
+        self.view.status.log(msg);
+        err_at!(Fatal, execute!(self.view.tm.stdout, self.view.status))?;
+        if msg.len() > 0 {
+            debug!("Status <- {}", msg);
+        }
+        Ok(())
+    }
+
     #[inline]
     fn flush(&mut self) -> Result<&mut Self> {
         err_at!(Fatal, self.view.tm.stdout.flush())?;
@@ -199,6 +221,11 @@ where
     #[inline]
     pub fn to_viewport(&self) -> te::Viewport {
         self.view.to_viewport()
+    }
+
+    #[inline]
+    pub fn as_mut_status(&mut self) -> &mut te::StatusLine {
+        &mut self.view.status
     }
 }
 

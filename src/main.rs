@@ -1,12 +1,20 @@
+use dirs;
+use log::error;
+use simplelog;
 use structopt::StructOpt;
+
+use std::fs;
 
 #[macro_use]
 mod util;
+
 mod app;
 mod event;
 mod term_buffer;
 mod term_elements;
 mod term_layers;
+
+use ledger::core::{Error, Result};
 
 // commands:
 //      blinking, hide, show, enablemousecapture, disablemousecapture, clear, setsize,
@@ -41,7 +49,53 @@ pub struct Opt {
 
 fn main() {
     let opts = Opt::from_args();
-    if let Err(err) = app::run(opts) {
-        println!("{}", err)
+
+    match init_logger(&opts) {
+        Ok(()) => (),
+        Err(err) => {
+            println!("{}", err);
+            std::process::exit(1);
+        }
     }
+    match app::run(opts) {
+        Ok(()) => (),
+        Err(err) => error!("{}", err),
+    }
+}
+
+fn init_logger(opts: &Opt) -> Result<()> {
+    let mut home_dir = match dirs::home_dir() {
+        Some(home_dir) => Ok(home_dir),
+        None => Err(Error::Fatal("home directory not found !!".to_string())),
+    }?;
+    let log_file = {
+        home_dir.push(".ledger47");
+        err_at!(Fatal, fs::create_dir_all(home_dir.as_os_str()))?;
+        home_dir.push("appication.log");
+        home_dir.into_os_string()
+    };
+
+    let level_filter = if opts.trace {
+        simplelog::LevelFilter::Trace
+    } else if opts.verbose {
+        simplelog::LevelFilter::Debug
+    } else {
+        simplelog::LevelFilter::Info
+    };
+    println!("log level {}", level_filter);
+
+    let mut config = simplelog::ConfigBuilder::new();
+    config
+        .set_location_level(simplelog::LevelFilter::Error)
+        .set_target_level(simplelog::LevelFilter::Off)
+        .set_thread_mode(simplelog::ThreadLogMode::Both)
+        .set_thread_level(simplelog::LevelFilter::Error)
+        .set_time_to_local(true)
+        .set_time_format("%Y-%m-%dT%H-%M-%S%.3f".to_string());
+
+    let fs = err_at!(Fatal, fs::File::create(&log_file))?;
+
+    simplelog::WriteLogger::init(simplelog::LevelFilter::Trace, config.build(), fs);
+
+    Ok(())
 }

@@ -139,7 +139,7 @@ where
             let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
             self.status_log("");
 
-            trace!("Event <- {}", evnt);
+            trace!("Event-{}", evnt);
 
             match evnt {
                 Event::Resize { cols, rows } => {

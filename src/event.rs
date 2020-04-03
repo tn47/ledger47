@@ -41,6 +41,20 @@ pub enum Event {
     },
 }
 
+impl Event {
+    pub fn to_modifier(&self) -> KeyModifiers {
+        match self {
+            Event::Resize { .. } => KeyModifiers::empty(),
+            Event::Key { modifiers, .. } => modifiers.clone(),
+            Event::MouseDown { modifiers, .. } => modifiers.clone(),
+            Event::MouseUp { modifiers, .. } => modifiers.clone(),
+            Event::MouseDrag { modifiers, .. } => modifiers.clone(),
+            Event::MouseScrollDown { modifiers, .. } => modifiers.clone(),
+            Event::MouseScrollUp { modifiers, .. } => modifiers.clone(),
+        }
+    }
+}
+
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         match self {
@@ -53,29 +67,49 @@ impl fmt::Display for Event {
                 col,
                 row,
                 modifiers,
-            } => write!(f, "mousedown col:{} row:{}", col, row),
+            } => write!(
+                f,
+                "mousedown col:{} row:{} button:{:?} modifiers:{:?}",
+                col, row, button, modifiers
+            ),
             Event::MouseUp {
                 button,
                 col,
                 row,
                 modifiers,
-            } => write!(f, "mouseup col:{} row:{}", col, row),
+            } => write!(
+                f,
+                "mouseup col:{} row:{} button:{:?} modifiers:{:?}",
+                col, row, button, modifiers
+            ),
             Event::MouseDrag {
                 button,
                 col,
                 row,
                 modifiers,
-            } => write!(f, "mousedrag col:{} row:{}", col, row),
+            } => write!(
+                f,
+                "mousedrag col:{} row:{} button:{:?} modifiers:{:?}",
+                col, row, button, modifiers
+            ),
             Event::MouseScrollDown {
                 col,
                 row,
                 modifiers,
-            } => write!(f, "mouse_scrolldowncol:{} row:{}", col, row),
+            } => write!(
+                f,
+                "mouse_scrolldown col:{} row:{} modifiers:{:?}",
+                col, row, modifiers
+            ),
             Event::MouseScrollUp {
                 col,
                 row,
                 modifiers,
-            } => write!(f, "mouse_scrollup col:{} row:{}", col, row),
+            } => write!(
+                f,
+                "mouse_scrollup col:{} row:{} modifiers:{:?}",
+                col, row, modifiers
+            ),
         }
     }
 }

@@ -9,8 +9,8 @@ use std::fs;
 mod util;
 
 mod app;
+mod edit_buffer;
 mod event;
-mod term_buffer;
 mod term_elements;
 mod term_layers;
 

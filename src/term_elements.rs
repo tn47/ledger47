@@ -1,5 +1,6 @@
 use crossterm::{
     cursor,
+    event::KeyCode,
     style::{self, Color},
     Command,
 };
@@ -10,10 +11,13 @@ use std::{
     iter::FromIterator,
     ops::{self, RangeBounds},
     result,
+    str::FromStr,
 };
 
-use crate::term_buffer::Buffer;
-use ledger::core::Result;
+use crate::app::Application;
+use crate::edit_buffer::Buffer;
+use crate::event::Event;
+use ledger::core::{Result, Store};
 
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
@@ -27,9 +31,8 @@ pub const FG_INPUT_NAME: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
 pub const FG_STATUS: Color = Color::AnsiValue(15);
 
-#[macro_export]
 macro_rules! impl_command {
-    ($e:ty) => {
+    ($e:tt) => {
         impl Command for $e {
             type AnsiType = String;
 
@@ -54,6 +57,23 @@ impl Element {
             Element::Border(em) => em.coord.to_viewport().contain_cell(col, row),
             Element::InputLine(em) => em.coord.to_viewport().contain_cell(col, row),
             Element::TextLine(em) => em.coord.to_viewport().contain_cell(col, row),
+        }
+    }
+
+    pub fn handle_event<D, T>(
+        &mut self,
+        app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        match self {
+            Element::Title(em) => em.handle_event(app, evnt),
+            Element::Border(em) => em.handle_event(app, evnt),
+            Element::InputLine(em) => em.handle_event(app, evnt),
+            Element::TextLine(em) => em.handle_event(app, evnt),
         }
     }
 }
@@ -219,6 +239,18 @@ impl Title {
         let content = " ".to_string() + content + " ";
         Ok(Title { coord, content })
     }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        Ok(Some(evnt))
+    }
 }
 
 impl fmt::Display for Title {
@@ -246,6 +278,18 @@ impl_command!(Border);
 impl Border {
     pub fn new(coord: Coordinates) -> Result<Border> {
         Ok(Border { coord })
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        Ok(Some(evnt))
     }
 }
 
@@ -316,13 +360,35 @@ impl InputLine {
             .sum::<usize>() as u16;
 
         let bytes: Vec<u8> = vec![];
-        let buffer = Buffer::new(bytes.as_slice()).ok().unwrap().into_insert();
+        let mut buffer = Buffer::new(bytes.as_slice())?;
+        buffer.change_to_insert();
         Ok(InputLine {
             coord,
             prefix: prefix.to_string(),
             n_prefix,
             buffer,
         })
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        match evnt {
+            Event::Key {
+                code: KeyCode::Enter,
+                ..
+            } => Ok(Some(evnt)),
+            evnt => {
+                let er = self.buffer.handle_event(evnt)?;
+                Ok(er.evnt)
+            }
+        }
     }
 }
 
@@ -381,6 +447,18 @@ impl TextLine {
             fg,
         })
     }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        Ok(Some(evnt))
+    }
 }
 
 impl fmt::Display for TextLine {
@@ -432,6 +510,18 @@ impl StatusLine {
             chrono::Local::now().format("%d-%b-%y"),
             width = w1,
         );
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        Ok(Some(evnt))
     }
 }
 

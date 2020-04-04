@@ -73,9 +73,9 @@ where
             te::Title::new(title_vp, &content).ok().unwrap()
         };
         let ws_input_name = {
-            let prefix = "Enter workspace name : ";
-            let input_vp = vp.clone().move_by(2, 3).resize_to(1, 60);
-            te::EditLine::new(input_vp, prefix).ok().unwrap()
+            let inline = "Enter workspace name, only alphanumeric and '_'";
+            let input_vp = vp.clone().move_by(2, 3).resize_to(1, 70);
+            te::EditLine::new(input_vp, inline).ok().unwrap()
         };
         let comm_head = {
             let content = "Enter default commodity details";
@@ -85,19 +85,19 @@ where
                 .unwrap()
         };
         let comm_input_name = {
-            let prefix = " Name : ";
-            let comm_vp = vp.clone().move_by(5, 7).resize_to(1, 40);
-            te::EditLine::new(comm_vp, prefix).ok().unwrap()
+            let inline = "Name of the commodity, only alphanumeric";
+            let comm_vp = vp.clone().move_by(5, 7).resize_to(1, 60);
+            te::EditLine::new(comm_vp, inline).ok().unwrap()
         };
         let comm_tags = {
-            let prefix = " Tags : ";
-            let comm_vp = vp.clone().move_by(5, 9).resize_to(1, 40);
-            te::EditLine::new(comm_vp, prefix).ok().unwrap()
+            let inline = "List of tags, EG: money.asia,exchange.westernunion";
+            let comm_vp = vp.clone().move_by(5, 9).resize_to(1, 60);
+            te::EditLine::new(comm_vp, inline).ok().unwrap()
         };
         let comm_input_notes = {
-            let prefix = "Notes : ";
-            let comm_vp = vp.clone().move_by(5, 11).resize_to(10, 40);
-            te::EditBox::new(comm_vp, prefix).ok().unwrap()
+            let inline = "Any notes for user consumption";
+            let comm_vp = vp.clone().move_by(5, 11).resize_to(10, 60);
+            te::EditBox::new(comm_vp, inline).ok().unwrap()
         };
 
         let elements = vec![

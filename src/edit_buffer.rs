@@ -93,6 +93,20 @@ impl Buffer {
         }
         .to_string()
     }
+
+    pub fn to_lines(&self) -> Vec<String> {
+        match self {
+            Buffer::Normal { buf, .. } => {
+                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
+            }
+            Buffer::Insert { buf, .. } => {
+                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
+            }
+            Buffer::Replace { buf, .. } => {
+                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
+            }
+        }
+    }
 }
 
 impl Buffer {

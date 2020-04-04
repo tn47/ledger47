@@ -8,7 +8,7 @@ use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
 
 use std::{
-    fmt,
+    cmp, fmt,
     iter::FromIterator,
     ops::{self, RangeBounds},
     result,
@@ -22,15 +22,15 @@ use ledger::core::{Result, Store};
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
 
-pub const BG_LAYER: Color = Color::AnsiValue(236);
-pub const BG_INPUT: Color = Color::AnsiValue(234);
+pub const BG_LAYER: Color = Color::AnsiValue(235);
+pub const BG_EDIT: Color = Color::AnsiValue(232);
 
 pub const FG_PERIOD: Color = Color::AnsiValue(27);
 pub const FG_DATE: Color = Color::AnsiValue(33);
 pub const FG_TITLE: Color = Color::AnsiValue(6);
 pub const FG_BORDER: Color = Color::AnsiValue(15);
-pub const FG_INPUT: Color = Color::AnsiValue(15);
-pub const FG_INPUT_NAME: Color = Color::AnsiValue(15);
+pub const FG_EDIT_INLINE: Color = Color::AnsiValue(240);
+pub const FG_EDIT: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
 pub const FG_STATUS: Color = Color::AnsiValue(15);
 
@@ -605,18 +605,18 @@ impl fmt::Display for StatusLine {
 #[derive(Clone)]
 pub struct EditLine {
     vp: Viewport,
-    prefix: String,
+    inline: String,
     buffer: Buffer,
 }
 
 impl_command!(EditLine);
 
 impl EditLine {
-    pub fn new(vp: Viewport, prefix: &str) -> Result<EditLine> {
+    pub fn new(vp: Viewport, inline: &str) -> Result<EditLine> {
         let bytes: Vec<u8> = vec![];
         Ok(EditLine {
             vp,
-            prefix: prefix.to_string(),
+            inline: inline.to_string(),
             buffer: Buffer::empty()?.change_to_insert(),
         })
     }
@@ -660,28 +660,33 @@ impl fmt::Display for EditLine {
             width
         );
 
-        let n_prefix = self
-            .prefix
-            .chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum::<usize>() as u16;
+        let view_line = String::from_iter(repeat(' ').take(width as usize));
+        let inline = {
+            let n_inline = cmp::min(
+                self.inline
+                    .chars()
+                    .map(|c| c.width().unwrap_or(0))
+                    .sum::<usize>() as u16,
+                width,
+            ) as usize;
+            String::from_iter(self.inline.chars().take(n_inline))
+        };
 
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(f, "{}", style::style(view_line).on(BG_EDIT).with(BG_EDIT))?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
-            style::style(self.prefix.clone())
-                .on(BG_LAYER)
-                .with(FG_INPUT_NAME)
+            style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
-            style::style(String::from_iter(
-                repeat(' ').take((width - n_prefix) as usize)
-            ))
-            .on(BG_INPUT)
-            .with(FG_INPUT)
+            style::style(self.buffer.to_string())
+                .on(BG_EDIT)
+                .with(FG_EDIT)
         )
     }
 }
@@ -689,18 +694,18 @@ impl fmt::Display for EditLine {
 #[derive(Clone)]
 pub struct EditBox {
     vp: Viewport,
-    prefix: String,
+    inline: String,
     buffer: Buffer,
 }
 
 impl_command!(EditBox);
 
 impl EditBox {
-    pub fn new(vp: Viewport, prefix: &str) -> Result<EditBox> {
+    pub fn new(vp: Viewport, inline: &str) -> Result<EditBox> {
         let mut buffer = Buffer::empty()?.change_to_insert();
         Ok(EditBox {
             vp,
-            prefix: prefix.to_string(),
+            inline: inline.to_string(),
             buffer,
         })
     }
@@ -744,30 +749,38 @@ impl fmt::Display for EditBox {
             width
         );
 
-        let n_prefix = self
-            .prefix
-            .chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum::<usize>() as u16;
+        let view_line = String::from_iter(repeat(' ').take(width as usize));
+        let inline = {
+            let n_inline = cmp::min(
+                self.inline
+                    .chars()
+                    .map(|c| c.width().unwrap_or(0))
+                    .sum::<usize>() as u16,
+                width,
+            ) as usize;
+            String::from_iter(self.inline.chars().take(n_inline))
+        };
 
+        for i in 0..height {
+            write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
+            write!(
+                f,
+                "{}",
+                style::style(view_line.clone()).on(BG_EDIT).with(BG_EDIT)
+            )?;
+        }
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
-            style::style(self.prefix.clone())
-                .on(BG_LAYER)
-                .with(FG_INPUT_NAME)
+            style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
-
-        let (col, width) = (col + n_prefix, width - n_prefix);
-        for row in row..(row + height) {
-            write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        for (i, line) in self.buffer.to_lines().into_iter().enumerate() {
+            write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
             write!(
                 f,
                 "{}",
-                style::style(String::from_iter(repeat(' ').take((width) as usize)))
-                    .on(BG_INPUT)
-                    .with(FG_INPUT)
+                style::style(line.to_string()).on(BG_EDIT).with(FG_EDIT)
             )?;
         }
 

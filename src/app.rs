@@ -1,3 +1,4 @@
+use chrono;
 use crossterm::{
     cursor,
     event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, KeyCode},
@@ -16,6 +17,7 @@ use std::{
 use crate::event::Event;
 use crate::term_elements as te;
 use crate::term_layers::{self as tl, Layer};
+use crate::util;
 use crate::Opt;
 
 use ledger::{
@@ -67,7 +69,7 @@ where
         let vp = te::Viewport::new(1, 1, tm.rows - 1, tm.cols);
         let status = {
             let vp = vp.clone().move_to(1, vp.to_bottom()).resize_to(1, tm.cols);
-            te::StatusLine::new(te::Coordinates::new(vp))?
+            te::StatusLine::new(vp)?
         };
 
         debug!("App view-port {}", vp);
@@ -95,6 +97,8 @@ where
     dir: ffi::OsString,
     view: View<D, T>,
     store: Option<D>,
+    date: chrono::Date<chrono::Local>,
+    period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 }
 
 impl<D, T> Application<D, T>
@@ -107,6 +111,8 @@ where
             dir: dir.clone(),
             view: View::new()?,
             store: Default::default(),
+            date: chrono::Local::now().date(),
+            period: util::date_to_period(chrono::Local::now().date()),
         };
         let layer = tl::NewWorkspace::new_layer(&mut app)?;
         app.view.layers.push(layer);
@@ -121,6 +127,8 @@ where
             dir: dir.clone(),
             view: View::new()?,
             store: Default::default(),
+            date: chrono::Local::now().date(),
+            period: util::date_to_period(chrono::Local::now().date()),
         };
         // TODO: change this to different view.
         let layer = tl::NewWorkspace::new_layer(&mut app)?;
@@ -217,15 +225,47 @@ where
         err_at!(Fatal, self.view.tm.stdout.flush())?;
         Ok(self)
     }
+}
 
+impl<D, T> Application<D, T>
+where
+    D: Store<T>,
+    T: ToString + FromStr,
+{
     #[inline]
     pub fn to_viewport(&self) -> te::Viewport {
         self.view.to_viewport()
     }
 
     #[inline]
+    pub fn to_local_date(&self) -> chrono::Date<chrono::Local> {
+        self.date.clone()
+    }
+
+    #[inline]
+    pub fn to_local_period(&self) -> (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>) {
+        self.period.clone()
+    }
+
+    #[inline]
     pub fn as_mut_status(&mut self) -> &mut te::StatusLine {
         &mut self.view.status
+    }
+
+    #[inline]
+    pub fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
+        self.date = date;
+        self.period = util::date_to_period(date);
+        self
+    }
+
+    #[inline]
+    pub fn set_period(
+        &mut self,
+        period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
+    ) -> &mut Self {
+        self.period = period;
+        self
     }
 }
 

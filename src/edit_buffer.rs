@@ -8,25 +8,6 @@ use ledger::core::{Error, Result};
 
 const NEW_LINE_CHAR: char = '\n';
 
-macro_rules! replace_fields {
-    ($buf:expr) => {
-        match $buf {
-            Buffer::Normal { buf, cursor } => (
-                mem::replace(buf, Default::default()),
-                mem::replace(cursor, Default::default()),
-            ),
-            Buffer::Insert { buf, cursor } => (
-                mem::replace(buf, Default::default()),
-                mem::replace(cursor, Default::default()),
-            ),
-            Buffer::Replace { buf, cursor } => (
-                mem::replace(buf, Default::default()),
-                mem::replace(cursor, Default::default()),
-            ),
-        }
-    };
-}
-
 pub struct EditRes {
     pub col_at: Option<usize>,
     pub row_by: isize,
@@ -63,7 +44,7 @@ impl Default for Buffer {
 }
 
 impl Buffer {
-    pub fn new<R>(data: R) -> Result<Buffer>
+    pub fn from_reader<R>(data: R) -> Result<Buffer>
     where
         R: io::Read,
     {
@@ -71,19 +52,37 @@ impl Buffer {
         Ok(Buffer::Normal { buf, cursor: 0 })
     }
 
-    pub fn change_to_insert(&mut self) {
-        let (buf, cursor) = replace_fields!(self);
-        *self = Buffer::Insert { buf, cursor }
+    pub fn empty() -> Result<Buffer> {
+        let bytes: Vec<u8> = vec![];
+        let buf = err_at!(IOError, Rope::from_reader(bytes.as_slice()))?;
+        Ok(Buffer::Normal { buf, cursor: 0 })
     }
 
-    pub fn change_to_replace(&mut self) {
-        let (buf, cursor) = replace_fields!(self);
-        *self = Buffer::Replace { buf, cursor }
+    pub fn change_to_insert(self) -> Self {
+        use Buffer::{Insert, Normal, Replace};
+        match self {
+            Normal { buf, cursor } => Insert { buf, cursor },
+            Insert { buf, cursor } => Insert { buf, cursor },
+            Replace { buf, cursor } => Insert { buf, cursor },
+        }
     }
 
-    pub fn change_to_normal(&mut self) {
-        let (buf, cursor) = replace_fields!(self);
-        *self = Buffer::Normal { buf, cursor }
+    pub fn change_to_replace(self) -> Self {
+        use Buffer::{Insert, Normal, Replace};
+        match self {
+            Normal { buf, cursor } => Replace { buf, cursor },
+            Insert { buf, cursor } => Replace { buf, cursor },
+            Replace { buf, cursor } => Replace { buf, cursor },
+        }
+    }
+
+    pub fn change_to_normal(self) -> Self {
+        use Buffer::{Insert, Normal, Replace};
+        match self {
+            Normal { buf, cursor } => Normal { buf, cursor },
+            Insert { buf, cursor } => Normal { buf, cursor },
+            Replace { buf, cursor } => Normal { buf, cursor },
+        }
     }
 
     pub fn to_string(&self) -> String {

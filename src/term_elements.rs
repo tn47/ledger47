@@ -53,10 +53,10 @@ enum Element {
 impl Element {
     fn contain_cell(&self, col: u16, row: u16) -> bool {
         match self {
-            Element::Title(em) => em.coord.to_viewport().contain_cell(col, row),
-            Element::Border(em) => em.coord.to_viewport().contain_cell(col, row),
-            Element::InputLine(em) => em.coord.to_viewport().contain_cell(col, row),
-            Element::TextLine(em) => em.coord.to_viewport().contain_cell(col, row),
+            Element::Title(em) => em.vp.contain_cell(col, row),
+            Element::Border(em) => em.vp.contain_cell(col, row),
+            Element::InputLine(em) => em.vp.contain_cell(col, row),
+            Element::TextLine(em) => em.vp.contain_cell(col, row),
         }
     }
 
@@ -79,29 +79,82 @@ impl Element {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Viewport(u16, u16, u16, u16);
+pub struct Viewport {
+    col: u16,
+    row: u16,
+    height: u16,
+    width: u16,
+    scroll_off: u16,
+    cursor: Option<(u16, u16)>, // (col-offset, row-offset)
+}
 
 impl fmt::Display for Viewport {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        let (c, r, h, w) = (self.0, self.1, self.2, self.3);
-        write!(f, "Viewport<col:{} row:{} height:{} width:{}>", c, r, h, w)
+        write!(
+            f,
+            "Viewport<col:{} row:{} height:{} width:{}>",
+            self.col, self.row, self.height, self.width
+        )
     }
 }
 
 impl Viewport {
     #[inline]
     pub fn new(col: u16, row: u16, height: u16, width: u16) -> Viewport {
-        Viewport(col, row, height, width)
+        Viewport {
+            col,
+            row,
+            height,
+            width,
+            scroll_off: Default::default(),
+            cursor: None,
+        }
     }
 
     #[inline]
+    pub fn set_scroll_off(mut self, scroll_off: u16) -> Self {
+        self.scroll_off = scroll_off;
+        self
+    }
+
+    #[inline]
+    pub fn move_to(mut self, col: u16, row: u16) -> Self {
+        self.col = col;
+        self.row = row;
+        self
+    }
+
+    #[inline]
+    pub fn move_by(mut self, col_off: i16, row_off: i16) -> Self {
+        self.col = ((self.col as i16) + col_off) as u16;
+        self.row = ((self.row as i16) + row_off) as u16;
+        self
+    }
+
+    #[inline]
+    pub fn resize_to(mut self, height: u16, width: u16) -> Self {
+        self.height = height;
+        self.width = width;
+        self
+    }
+
+    #[inline]
+    pub fn resize_by(mut self, height_off: i16, width_off: i16) -> Self {
+        self.height = ((self.height as i16) + height_off) as u16;
+        self.width = ((self.width as i16) + width_off) as u16;
+        self
+    }
+}
+
+impl Viewport {
+    #[inline]
     pub fn col_range(&self) -> impl ops::RangeBounds<u16> {
-        self.0..(self.0 + self.3)
+        self.col..(self.col + self.width)
     }
 
     #[inline]
     pub fn row_range(&self) -> impl ops::RangeBounds<u16> {
-        self.1..(self.1 + self.2)
+        self.row..(self.row + self.height)
     }
 
     #[inline]
@@ -111,86 +164,32 @@ impl Viewport {
 
     #[inline]
     pub fn to_origin(&self) -> (u16, u16) {
-        (self.0, self.1)
+        (self.col, self.row)
     }
 
     #[inline]
     pub fn to_size(&self) -> (u16, u16) {
-        (self.2, self.3)
+        (self.height, self.width)
     }
 
     #[inline]
     pub fn to_top(&self) -> u16 {
-        self.1
+        self.row
     }
 
     #[inline]
     pub fn to_right(&self) -> u16 {
-        self.0 + self.3 - 1
+        self.col + self.width - 1
     }
 
     #[inline]
     pub fn to_bottom(&self) -> u16 {
-        self.1 + self.2 - 1
+        self.row + self.height - 1
     }
 
     #[inline]
     pub fn to_left(&self) -> u16 {
-        self.0
-    }
-
-    #[inline]
-    pub fn move_to(mut self, col: u16, row: u16) -> Self {
-        self.0 = col;
-        self.1 = row;
-        self
-    }
-
-    #[inline]
-    pub fn move_by(mut self, col_off: i16, row_off: i16) -> Self {
-        self.0 = ((self.0 as i16) + col_off) as u16;
-        self.1 = ((self.1 as i16) + row_off) as u16;
-        self
-    }
-
-    #[inline]
-    pub fn resize_to(mut self, height: u16, width: u16) -> Self {
-        self.2 = height;
-        self.3 = width;
-        self
-    }
-
-    #[inline]
-    pub fn resize_by(mut self, height_off: i16, width_off: i16) -> Self {
-        self.2 = ((self.2 as i16) + height_off) as u16;
-        self.3 = ((self.3 as i16) + width_off) as u16;
-        self
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct Coordinates {
-    vp: Viewport,
-    scroll_off: u16,
-    cursor: Option<(u16, u16)>, // (col-offset, row-offset)
-}
-
-impl Coordinates {
-    pub fn new(vp: Viewport) -> Coordinates {
-        Coordinates {
-            vp: vp.clone(),
-            scroll_off: Default::default(),
-            cursor: Some(vp.to_origin()),
-        }
-    }
-
-    pub fn set_scroll_off(mut self, scroll_off: u16) -> Self {
-        self.scroll_off = scroll_off;
-        self
-    }
-
-    pub fn to_viewport(&self) -> Viewport {
-        self.vp.clone()
+        self.col
     }
 
     pub fn to_cursor(&self) -> Option<(u16, u16)> {
@@ -200,15 +199,15 @@ impl Coordinates {
     pub fn cursor_move_to(&mut self, col: u16, row: u16) -> (u16, u16) {
         match self.cursor {
             Some((_, _)) => {
-                let (ccol, rcol) = if self.vp.col_range().contains(&col) {
+                let (ccol, rcol) = if self.col_range().contains(&col) {
                     (col, 0)
                 } else {
-                    (self.vp.to_right(), col - self.vp.to_right())
+                    (self.to_right(), col - self.to_right())
                 };
-                let (crow, rrow) = if self.vp.row_range().contains(&row) {
+                let (crow, rrow) = if self.row_range().contains(&row) {
                     (row, 0)
                 } else {
-                    let crow = self.vp.to_bottom() - self.scroll_off;
+                    let crow = self.to_bottom() - self.scroll_off;
                     (crow, row - crow)
                 };
                 self.cursor = Some((ccol, crow));
@@ -227,17 +226,72 @@ impl Coordinates {
 }
 
 #[derive(Default, Clone)]
+pub struct HeadLine {
+    vp: Viewport,
+    line: String,
+}
+
+impl_command!(HeadLine);
+
+impl HeadLine {
+    pub fn new<D, T>(vp: Viewport, app: &Application<D, T>) -> Result<HeadLine>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        use std::iter::repeat;
+
+        let s_date = app.to_local_date().format("%d-%b-%y");
+        let s_per0 = app.to_local_period().0.format("%d-%b-%y");
+        let s_per1 = app.to_local_period().1.format("%d-%b-%y");
+
+        let part0 = format!("{}/{} {}", s_per0, s_per1, s_date);
+        let mut line = {
+            let (_, width) = vp.to_size();
+            String::from_iter(repeat(' ').take((width as usize) - part0.len()))
+        };
+        line.push_str(&part0);
+
+        Ok(HeadLine { vp, line })
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        Ok(Some(evnt))
+    }
+}
+
+impl fmt::Display for HeadLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        let (col, row) = self.vp.to_origin();
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.line.clone()).on(BG_LAYER).with(FG_STATUS)
+        )
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct Title {
-    coord: Coordinates,
+    vp: Viewport,
     content: String,
 }
 
 impl_command!(Title);
 
 impl Title {
-    pub fn new(coord: Coordinates, content: &str) -> Result<Title> {
+    pub fn new(vp: Viewport, content: &str) -> Result<Title> {
         let content = " ".to_string() + content + " ";
-        Ok(Title { coord, content })
+        Ok(Title { vp, content })
     }
 
     fn handle_event<D, T>(
@@ -255,7 +309,7 @@ impl Title {
 
 impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        let (col, row) = self.coord.to_viewport().to_origin();
+        let (col, row) = self.vp.to_origin();
         write!(f, "{}", cursor::Hide)?;
         write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
         write!(
@@ -270,14 +324,14 @@ impl fmt::Display for Title {
 
 #[derive(Default, Clone)]
 pub struct Border {
-    coord: Coordinates,
+    vp: Viewport,
 }
 
 impl_command!(Border);
 
 impl Border {
-    pub fn new(coord: Coordinates) -> Result<Border> {
-        Ok(Border { coord })
+    pub fn new(vp: Viewport) -> Result<Border> {
+        Ok(Border { vp })
     }
 
     fn handle_event<D, T>(
@@ -298,10 +352,10 @@ impl fmt::Display for Border {
         use std::iter::repeat;
 
         let (col, row) = {
-            let (c, r) = self.coord.to_viewport().to_origin();
+            let (c, r) = self.vp.to_origin();
             (c - 1, r - 1)
         };
-        let (ht, wd) = self.coord.to_viewport().to_size();
+        let (ht, wd) = self.vp.to_size();
         write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
         write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
 
@@ -342,87 +396,9 @@ impl fmt::Display for Border {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct InputLine {
-    coord: Coordinates,
-    prefix: String,
-    n_prefix: u16,
-    buffer: Buffer,
-}
-
-impl_command!(InputLine);
-
-impl InputLine {
-    pub fn new(coord: Coordinates, prefix: &str) -> Result<InputLine> {
-        let n_prefix = prefix
-            .chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum::<usize>() as u16;
-
-        let bytes: Vec<u8> = vec![];
-        let mut buffer = Buffer::new(bytes.as_slice())?;
-        buffer.change_to_insert();
-        Ok(InputLine {
-            coord,
-            prefix: prefix.to_string(),
-            n_prefix,
-            buffer,
-        })
-    }
-
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
-    where
-        D: Store<T>,
-        T: ToString + FromStr,
-    {
-        match evnt {
-            Event::Key {
-                code: KeyCode::Enter,
-                ..
-            } => Ok(Some(evnt)),
-            evnt => {
-                let er = self.buffer.handle_event(evnt)?;
-                Ok(er.evnt)
-            }
-        }
-    }
-}
-
-impl fmt::Display for InputLine {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        use std::iter::repeat;
-
-        let (col, row) = self.coord.to_viewport().to_origin();
-        let (_, width) = self.coord.to_viewport().to_size();
-
-        write!(f, "{}", cursor::Hide)?;
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(self.prefix.clone())
-                .on(BG_LAYER)
-                .with(FG_INPUT_NAME)
-        )?;
-        write!(
-            f,
-            "{}",
-            style::style(String::from_iter(
-                repeat(' ').take((width - self.n_prefix) as usize)
-            ))
-            .on(BG_INPUT)
-            .with(FG_INPUT)
-        )
-    }
-}
-
 #[derive(Clone)]
 pub struct TextLine {
-    coord: Coordinates,
+    vp: Viewport,
     content: String,
     fg: Color,
 }
@@ -432,7 +408,7 @@ impl_command!(TextLine);
 impl Default for TextLine {
     fn default() -> Self {
         TextLine {
-            coord: Default::default(),
+            vp: Default::default(),
             content: Default::default(),
             fg: Color::White,
         }
@@ -440,9 +416,9 @@ impl Default for TextLine {
 }
 
 impl TextLine {
-    pub fn new(coord: Coordinates, content: &str, fg: Color) -> Result<TextLine> {
+    pub fn new(vp: Viewport, content: &str, fg: Color) -> Result<TextLine> {
         Ok(TextLine {
-            coord,
+            vp,
             content: content.to_string(),
             fg,
         })
@@ -463,7 +439,7 @@ impl TextLine {
 
 impl fmt::Display for TextLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        let (col, row) = self.coord.to_viewport().to_origin();
+        let (col, row) = self.vp.to_origin();
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
@@ -477,27 +453,25 @@ impl fmt::Display for TextLine {
 
 #[derive(Default, Clone)]
 pub struct StatusLine {
-    coord: Coordinates,
+    vp: Viewport,
     line: String,
 }
 
 impl_command!(StatusLine);
 
 impl StatusLine {
-    pub fn new(coord: Coordinates) -> Result<StatusLine> {
+    pub fn new(vp: Viewport) -> Result<StatusLine> {
         use std::iter::repeat;
 
-        let s = {
-            let (_, width) = coord.to_viewport().to_size();
-            String::from_iter(repeat('─').take((width - 11) as usize))
+        let line = {
+            let (_, width) = vp.to_size();
+            String::from_iter(repeat(' ').take(width as usize))
         };
-        let line = format!("{} {}", s, chrono::Local::now().format("%d-%b-%y"));
-        println!("{:?}", coord.to_viewport().to_origin());
-        Ok(StatusLine { coord, line })
+        Ok(StatusLine { vp, line })
     }
 
     pub fn log(&mut self, msg: &str) {
-        let (_, width) = self.coord.to_viewport().to_size();
+        let (_, width) = self.vp.to_size();
         let (mut w, w1) = (width - 11, (width - 11) as usize);
         let s = String::from_iter(msg.chars().rev().take_while(|ch| {
             w -= ch.width().unwrap() as u16;
@@ -527,12 +501,167 @@ impl StatusLine {
 
 impl fmt::Display for StatusLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        let (col, row) = self.coord.to_viewport().to_origin();
+        let (col, row) = self.vp.to_origin();
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
             "{}",
             style::style(self.line.clone()).on(BG_LAYER).with(FG_STATUS)
         )
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct InputLine {
+    vp: Viewport,
+    prefix: String,
+    buffer: Buffer,
+}
+
+impl_command!(InputLine);
+
+impl InputLine {
+    pub fn new(vp: Viewport, prefix: &str) -> Result<InputLine> {
+        let bytes: Vec<u8> = vec![];
+        Ok(InputLine {
+            vp,
+            prefix: prefix.to_string(),
+            buffer: Buffer::empty()?.change_to_insert(),
+        })
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        match evnt {
+            Event::Key {
+                code: KeyCode::Enter,
+                ..
+            } => Ok(Some(evnt)),
+            evnt => {
+                let er = self.buffer.handle_event(evnt)?;
+                Ok(er.evnt)
+            }
+        }
+    }
+}
+
+impl fmt::Display for InputLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        use std::iter::repeat;
+
+        let (col, row) = self.vp.to_origin();
+        let (_, width) = self.vp.to_size();
+
+        let n_prefix = self
+            .prefix
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>() as u16;
+
+        write!(f, "{}", cursor::Hide)?;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.prefix.clone())
+                .on(BG_LAYER)
+                .with(FG_INPUT_NAME)
+        )?;
+        write!(
+            f,
+            "{}",
+            style::style(String::from_iter(
+                repeat(' ').take((width - n_prefix) as usize)
+            ))
+            .on(BG_INPUT)
+            .with(FG_INPUT)
+        )
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct InputBox {
+    vp: Viewport,
+    prefix: String,
+    buffer: Buffer,
+}
+
+impl_command!(InputBox);
+
+impl InputBox {
+    pub fn new(vp: Viewport, prefix: &str) -> Result<InputBox> {
+        let mut buffer = Buffer::empty()?.change_to_insert();
+        Ok(InputBox {
+            vp,
+            prefix: prefix.to_string(),
+            buffer,
+        })
+    }
+
+    fn handle_event<D, T>(
+        &mut self,
+        _app: &mut Application<D, T>,
+        evnt: Event,
+    ) -> Result<Option<Event>>
+    where
+        D: Store<T>,
+        T: ToString + FromStr,
+    {
+        match evnt {
+            Event::Key {
+                code: KeyCode::Enter,
+                ..
+            } => Ok(Some(evnt)),
+            evnt => {
+                let er = self.buffer.handle_event(evnt)?;
+                Ok(er.evnt)
+            }
+        }
+    }
+}
+
+impl fmt::Display for InputBox {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        use std::iter::repeat;
+
+        let (col, row) = self.vp.to_origin();
+        let (height, width) = self.vp.to_size();
+
+        let n_prefix = self
+            .prefix
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>() as u16;
+
+        write!(f, "{}", cursor::Hide)?;
+        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(
+            f,
+            "{}",
+            style::style(self.prefix.clone())
+                .on(BG_LAYER)
+                .with(FG_INPUT_NAME)
+        )?;
+
+        let (col, width) = (col + n_prefix, width - n_prefix);
+        for row in row..(row + height) {
+            write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+            write!(
+                f,
+                "{}",
+                style::style(String::from_iter(repeat(' ').take((width) as usize)))
+                    .on(BG_INPUT)
+                    .with(FG_INPUT)
+            )?;
+        }
+
+        Ok(())
     }
 }

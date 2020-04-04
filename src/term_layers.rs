@@ -63,7 +63,8 @@ where
     D: Store<T>,
     T: ToString + FromStr,
 {
-    coord: te::Coordinates,
+    vp: te::Viewport,
+    // elements: Vec<te::Element>,
     title: te::Title,
     border: te::Border,
     ws_input_name: te::InputLine,
@@ -84,9 +85,10 @@ where
     }
 
     pub fn new_layer(app: &mut Application<D, T>) -> Result<Layer<D, T>> {
-        let coord = te::Coordinates::new(app.to_viewport());
+        let vp = app.to_viewport();
         Ok(Layer::NewWorkspace(NewWorkspace {
-            coord,
+            vp,
+            // elements: Default::default(),
             title: Default::default(),
             border: Default::default(),
             ws_input_name: Default::default(),
@@ -102,43 +104,36 @@ where
         NewWorkspace::new_layer(app)
     }
 
-    pub fn build(&mut self, _app: &mut Application<D, T>) -> Result<()> {
+    pub fn build(&mut self, app: &mut Application<D, T>) -> Result<()> {
+        //let (head, coord) = {
+        //    (_, width) = self.coord.to_viewport().to_size();
+        //    let vp = self.coord.to_viewport().resize_to(1, width);
+        //    te::HeadLine::new(te::Coordinates::new(vp)
+        //};
         self.title = {
             let content = "Create new workspace".to_string();
-            let vp = {
-                let vp = self.coord.to_viewport();
-                vp.move_by(2, 0).resize_to(1, (content.width() as u16) + 2)
-            };
-            te::Title::new(te::Coordinates::new(vp), &content)
-                .ok()
-                .unwrap()
+            let vp = self
+                .vp
+                .clone()
+                .move_by(2, 0)
+                .resize_to(1, (content.width() as u16) + 2);
+            te::Title::new(vp, &content).ok().unwrap()
         };
-        self.border = { te::Border::new(self.coord.clone()).ok().unwrap() };
+        self.border = { te::Border::new(self.vp.clone()).ok().unwrap() };
         self.ws_input_name = {
             let prefix = "Enter workspace name :";
-            let coord = {
-                let vp = self.coord.to_viewport();
-                te::Coordinates::new(vp.move_by(2, 3).resize_to(1, 60))
-            };
-            te::InputLine::new(coord, prefix).ok().unwrap()
+            let vp = self.vp.clone().move_by(2, 3).resize_to(1, 60);
+            te::InputLine::new(vp, prefix).ok().unwrap()
         };
         self.comm_head = {
             let content = "Enter default commodity details";
-            let coord = {
-                let vp = self.coord.to_viewport();
-                te::Coordinates::new(vp.move_by(2, 5).resize_to(1, 60))
-            };
-            te::TextLine::new(coord, content, te::FG_SECTION)
-                .ok()
-                .unwrap()
+            let vp = self.vp.clone().move_by(2, 5).resize_to(1, 60);
+            te::TextLine::new(vp, content, te::FG_SECTION).ok().unwrap()
         };
         self.comm_input_name = {
-            let prefix = "name :";
-            let coord = {
-                let vp = self.coord.to_viewport();
-                te::Coordinates::new(vp.move_by(5, 7).resize_to(1, 40))
-            };
-            te::InputLine::new(coord, prefix).ok().unwrap()
+            let prefix = "Name :";
+            let vp = self.vp.clone().move_by(5, 7).resize_to(1, 40);
+            te::InputLine::new(vp, prefix).ok().unwrap()
         };
 
         Ok(())
@@ -161,7 +156,7 @@ where
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
-        let (col, row) = self.coord.to_viewport().to_origin();
+        let (col, row) = self.vp.to_origin();
         let mut output: String = Default::default();
 
         output.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());

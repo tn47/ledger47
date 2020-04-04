@@ -1,3 +1,5 @@
+use chrono::{self, Datelike};
+
 #[macro_export]
 macro_rules! err_at {
     ($v:ident, msg:$msg:expr) => {
@@ -60,4 +62,17 @@ macro_rules! json_to_native_string_array {
             None => err_at!(InvalidJson, msg: $msg),
         }
     };
+}
+
+pub fn date_to_period<T>(date: chrono::Date<T>) -> (chrono::Date<T>, chrono::Date<T>)
+where
+    T: chrono::TimeZone,
+{
+    let tz = date.timezone();
+    let closing = tz.ymd(date.year(), 3, 31);
+    if date <= closing {
+        (tz.ymd(date.year() - 1, 4, 1), tz.ymd(date.year(), 3, 31))
+    } else {
+        (tz.ymd(date.year(), 4, 1), tz.ymd(date.year() + 1, 3, 31))
+    }
 }

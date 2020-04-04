@@ -1,5 +1,5 @@
 use chrono::{self, Datelike};
-use jsondata::{Json, JsonSerialize, Property};
+use jsondata::{Json, JsonSerialize};
 use uuid;
 
 use std::{cmp, convert::TryInto};

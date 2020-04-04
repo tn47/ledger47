@@ -1,53 +1,41 @@
-use crossterm::{cursor, style, terminal, Command};
+use crossterm::Command;
+use log::trace;
 use unicode_width::UnicodeWidthStr;
 
-use std::{marker, str::FromStr};
+use std::marker;
 
 use crate::app::Application;
 use crate::event::Event;
 use crate::term_elements::{self as te};
 use ledger::core::{Result, Store};
 
-pub enum Layer<D, T>
+pub enum Layer<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
-    NewWorkspace(NewWorkspace<D, T>),
+    NewWorkspace(NewWorkspace<S>),
 }
 
-impl<D, T> Layer<D, T>
+impl<S> Layer<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
-    pub fn resize(self, app: &mut Application<D, T>) -> Result<Self> {
+    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
         match self {
-            Layer::NewWorkspace(layer) => layer.resize(app),
+            Layer::NewWorkspace(layer) => layer.refresh(app),
         }
     }
 
-    pub fn build(&mut self, app: &mut Application<D, T>) -> Result<()> {
-        match self {
-            Layer::NewWorkspace(layer) => layer.build(app),
-        }
-    }
-
-    pub fn handle_event(
-        &mut self,
-        app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>> {
+    pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
         match self {
             Layer::NewWorkspace(layer) => layer.handle_event(app, evnt),
         }
     }
 }
 
-impl<D, T> Command for Layer<D, T>
+impl<S> Command for Layer<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     type AnsiType = String;
 
@@ -58,117 +46,113 @@ where
     }
 }
 
-pub struct NewWorkspace<D, T>
+pub struct NewWorkspace<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     vp: te::Viewport,
-    // elements: Vec<te::Element>,
-    title: te::Title,
-    border: te::Border,
-    ws_input_name: te::InputLine,
-    comm_head: te::TextLine,
-    comm_input_name: te::InputLine,
+    elements: Vec<te::Element>,
 
-    _phantom_d: marker::PhantomData<D>,
-    _phantom_t: marker::PhantomData<T>,
+    _phantom_s: marker::PhantomData<S>,
 }
 
-impl<D, T> NewWorkspace<D, T>
+impl<S> NewWorkspace<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
-    pub fn to_url() -> String {
-        "/workspace/new".to_string()
-    }
-
-    pub fn new_layer(app: &mut Application<D, T>) -> Result<Layer<D, T>> {
+    pub fn new(app: &mut Application<S>) -> Result<NewWorkspace<S>> {
         let vp = app.to_viewport();
-        Ok(Layer::NewWorkspace(NewWorkspace {
-            vp,
-            // elements: Default::default(),
-            title: Default::default(),
-            border: Default::default(),
-            ws_input_name: Default::default(),
-            comm_head: Default::default(),
-            comm_input_name: Default::default(),
 
-            _phantom_d: marker::PhantomData,
-            _phantom_t: marker::PhantomData,
-        }))
-    }
-
-    pub fn resize(self, app: &mut Application<D, T>) -> Result<Layer<D, T>> {
-        NewWorkspace::new_layer(app)
-    }
-
-    pub fn build(&mut self, app: &mut Application<D, T>) -> Result<()> {
-        //let (head, coord) = {
-        //    (_, width) = self.coord.to_viewport().to_size();
-        //    let vp = self.coord.to_viewport().resize_to(1, width);
-        //    te::HeadLine::new(te::Coordinates::new(vp)
-        //};
-        self.title = {
+        let border = te::Border::new(vp.clone()).ok().unwrap();
+        let title = {
             let content = "Create new workspace".to_string();
-            let vp = self
-                .vp
+            let title_vp = vp
                 .clone()
                 .move_by(2, 0)
                 .resize_to(1, (content.width() as u16) + 2);
-            te::Title::new(vp, &content).ok().unwrap()
+            te::Title::new(title_vp, &content).ok().unwrap()
         };
-        self.border = { te::Border::new(self.vp.clone()).ok().unwrap() };
-        self.ws_input_name = {
-            let prefix = "Enter workspace name :";
-            let vp = self.vp.clone().move_by(2, 3).resize_to(1, 60);
-            te::InputLine::new(vp, prefix).ok().unwrap()
+        let ws_input_name = {
+            let prefix = "Enter workspace name : ";
+            let input_vp = vp.clone().move_by(2, 3).resize_to(1, 60);
+            te::EditLine::new(input_vp, prefix).ok().unwrap()
         };
-        self.comm_head = {
+        let comm_head = {
             let content = "Enter default commodity details";
-            let vp = self.vp.clone().move_by(2, 5).resize_to(1, 60);
-            te::TextLine::new(vp, content, te::FG_SECTION).ok().unwrap()
+            let comm_vp = vp.clone().move_by(2, 5).resize_to(1, 60);
+            te::TextLine::new(comm_vp, content, te::FG_SECTION)
+                .ok()
+                .unwrap()
         };
-        self.comm_input_name = {
-            let prefix = "Name :";
-            let vp = self.vp.clone().move_by(5, 7).resize_to(1, 40);
-            te::InputLine::new(vp, prefix).ok().unwrap()
+        let comm_input_name = {
+            let prefix = " Name : ";
+            let comm_vp = vp.clone().move_by(5, 7).resize_to(1, 40);
+            te::EditLine::new(comm_vp, prefix).ok().unwrap()
+        };
+        let comm_tags = {
+            let prefix = " Tags : ";
+            let comm_vp = vp.clone().move_by(5, 9).resize_to(1, 40);
+            te::EditLine::new(comm_vp, prefix).ok().unwrap()
+        };
+        let comm_input_notes = {
+            let prefix = "Notes : ";
+            let comm_vp = vp.clone().move_by(5, 11).resize_to(10, 40);
+            te::EditBox::new(comm_vp, prefix).ok().unwrap()
         };
 
+        let elements = vec![
+            te::Element::Border(border),
+            te::Element::Title(title),
+            te::Element::EditLine(ws_input_name),
+            te::Element::TextLine(comm_head),
+            te::Element::EditLine(comm_input_name),
+            te::Element::EditLine(comm_tags),
+            te::Element::EditBox(comm_input_notes),
+        ];
+
+        Ok(NewWorkspace {
+            vp,
+            elements,
+
+            _phantom_s: marker::PhantomData,
+        })
+    }
+
+    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
         Ok(())
     }
 
     pub fn handle_event(
         &mut self,
-        _app: &mut Application<D, T>,
+        _app: &mut Application<S>,
         evnt: Event,
     ) -> Result<Option<Event>> {
         Ok(Some(evnt))
     }
 }
 
-impl<D, T> Command for NewWorkspace<D, T>
+impl<S> Command for NewWorkspace<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
         let (col, row) = self.vp.to_origin();
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "NewWorkspace::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
         let mut output: String = Default::default();
-
-        output.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
-        output.push_str(&style::SetBackgroundColor(te::BG_LAYER).to_string());
-        output.push_str(&terminal::Clear(terminal::ClearType::All).to_string());
-        output.push_str(&self.border.to_string());
-        output.push_str(&self.title.to_string());
-        output.push_str(&self.ws_input_name.to_string());
-        output.push_str(&self.comm_head.to_string());
-        output.push_str(&self.comm_input_name.to_string());
-        output.push_str(&cursor::Hide.to_string());
-
+        for element in self.elements.iter() {
+            output.push_str(&element.to_string());
+        }
         output
     }
 }

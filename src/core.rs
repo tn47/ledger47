@@ -1,37 +1,31 @@
-use std::{fmt, result, str::FromStr};
+use std::{fmt, result};
 
 pub type Result<T> = result::Result<T, Error>;
 
 // data-types and report-types can be durable.
-pub trait Durable<T>: Default + Clone
-where
-    T: ToString + FromStr,
-{
+pub trait Durable: Default + Clone {
     // type name must be unique across data and reports
     fn to_type(&self) -> String;
     // a unique key across all values of any type.
     fn to_key(&self) -> String;
     // serialize data-value or report-value that can be persisted.
-    fn encode(&self) -> Result<T>;
+    fn encode(&self) -> Result<String>;
     // de-serialize data-value or report-value from bytes.
     fn decode(&mut self, from: &str) -> Result<()>;
 }
 
-pub trait Store<T>
-where
-    T: ToString + FromStr,
-{
+pub trait Store {
     fn put<V>(&self, value: V) -> Result<Option<V>>
     where
-        V: Durable<T>;
+        V: Durable;
 
     fn get<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<T>;
+        V: Durable;
 
     fn delete<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<T>;
+        V: Durable;
 }
 
 pub enum Error {

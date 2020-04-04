@@ -2,16 +2,15 @@ use chrono;
 use crossterm::{
     cursor,
     event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, KeyCode},
-    execute, queue,
+    execute, queue, style,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use jsondata::Json;
 use log::{debug, info, trace};
 
 use std::{
     ffi,
     io::{self, Write},
-    str::FromStr,
+    mem,
 };
 
 use crate::event::Event;
@@ -34,7 +33,7 @@ pub fn run(opts: Opt) -> Result<()> {
     }?;
 
     let app = match store {
-        None => Application::<db_files::Db, Json>::new_workspace(dir.to_os_string())?,
+        None => Application::<db_files::Db>::new_workspace(dir.to_os_string())?,
         Some(_store) => todo!(),
     };
 
@@ -46,39 +45,36 @@ enum ViewFocus {
     Cmd,
 }
 
-pub struct View<D, T>
+pub struct View<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     tm: Terminal,
     vp: te::Viewport,
-    layers: Vec<Layer<D, T>>,
+    head: te::HeadLine,
+    layers: Vec<Layer<S>>,
     status: te::StatusLine,
     // cmd: te::CmdLine,
     focus: ViewFocus,
 }
 
-impl<D, T> View<D, T>
+impl<S> View<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
-    pub fn new() -> Result<View<D, T>> {
+    pub fn new() -> Result<View<S>> {
         let tm = err_at!(Fatal, Terminal::init())?;
-        let vp = te::Viewport::new(1, 1, tm.rows - 1, tm.cols);
-        let status = {
-            let vp = vp.clone().move_to(1, vp.to_bottom()).resize_to(1, tm.cols);
-            te::StatusLine::new(vp)?
-        };
+        // adjust full screen for a head-line in top and status-line at bottom.
+        let vp = te::Viewport::new(1, 2, tm.rows - 2, tm.cols);
 
         debug!("App view-port {}", vp);
 
         Ok(View {
             tm,
             vp,
+            head: unsafe { mem::zeroed() },
             layers: Default::default(),
-            status,
+            status: unsafe { mem::zeroed() },
             focus: ViewFocus::Layer,
         })
     }
@@ -89,24 +85,22 @@ where
     }
 }
 
-pub struct Application<D, T>
+pub struct Application<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     dir: ffi::OsString,
-    view: View<D, T>,
-    store: Option<D>,
+    view: View<S>,
+    store: Option<S>,
     date: chrono::Date<chrono::Local>,
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 }
 
-impl<D, T> Application<D, T>
+impl<S> Application<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
-    fn new_workspace(dir: ffi::OsString) -> Result<Application<D, T>> {
+    fn new_workspace(dir: ffi::OsString) -> Result<Application<S>> {
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
@@ -114,15 +108,25 @@ where
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
         };
-        let layer = tl::NewWorkspace::new_layer(&mut app)?;
-        app.view.layers.push(layer);
+
+        app.view.head = {
+            let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
+            te::HeadLine::new(vp, &mut app)?
+        };
+        app.view.status = {
+            let vp = te::Viewport::new(1, app.view.tm.rows, 1, app.view.tm.cols);
+            te::StatusLine::new(vp)?
+        };
+
+        let layer = tl::NewWorkspace::new(&mut app)?;
+        app.view.layers.push(Layer::NewWorkspace(layer));
 
         info!("New workspace dir:{:?}", dir);
 
         Ok(app)
     }
 
-    fn new(dir: ffi::OsString) -> Result<Application<D, T>> {
+    fn new(dir: ffi::OsString) -> Result<Application<S>> {
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
@@ -130,9 +134,18 @@ where
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
         };
-        // TODO: change this to different view.
-        let layer = tl::NewWorkspace::new_layer(&mut app)?;
-        app.view.layers.push(layer);
+
+        app.view.head = {
+            let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
+            te::HeadLine::new(vp, &mut app)?
+        };
+        app.view.status = {
+            let vp = te::Viewport::new(1, app.view.tm.rows, 1, app.view.tm.cols);
+            te::StatusLine::new(vp)?
+        };
+
+        let layer = tl::NewWorkspace::new(&mut app)?;
+        app.view.layers.push(Layer::NewWorkspace(layer));
 
         info!("Open workspace dir:{:?}", dir);
 
@@ -140,19 +153,16 @@ where
     }
 
     fn event_loop(mut self) -> Result<()> {
-        self.build()?.queue()?.flush()?;
-        self.status_log("");
+        self.view.status.log("");
+        self.refresh()?.queue()?.flush()?;
 
         loop {
             let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
-            self.status_log("");
 
             trace!("Event-{}", evnt);
 
             match evnt {
-                Event::Resize { cols, rows } => {
-                    self.resize(cols, rows)?.build()?.queue()?.flush()?;
-                }
+                Event::Resize { cols, rows } => (),
                 evnt => match self.handle_event(evnt)? {
                     Some(Event::Key {
                         code: KeyCode::Char('q'),
@@ -161,11 +171,12 @@ where
                     _ => (),
                 },
             };
+            self.refresh()?.queue()?.flush()?;
         }
     }
 
     fn handle_event(&mut self, mut evnt: Event) -> Result<Option<Event>> {
-        let mut layers: Vec<Layer<D, T>> = self.view.layers.drain(..).collect();
+        let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         let mut iter = layers.iter_mut().rev();
         loop {
             if let Some(layer) = iter.next() {
@@ -180,21 +191,15 @@ where
         }
     }
 
-    fn resize(&mut self, _cols: u16, _rows: u16) -> Result<&mut Self> {
-        self.view.tm = Terminal::init()?;
-        let layers: Vec<Layer<D, T>> = self.view.layers.drain(..).collect();
-        for layer in layers.into_iter() {
-            let layer = layer.resize(self)?;
-            self.view.layers.push(layer);
-        }
+    fn refresh(&mut self) -> Result<&mut Self> {
+        self.view.head = {
+            let vp = te::Viewport::new(1, 1, 1, self.view.tm.cols);
+            te::HeadLine::new(vp, self)?
+        };
 
-        Ok(self)
-    }
-
-    fn build(&mut self) -> Result<&mut Self> {
-        let mut layers: Vec<Layer<D, T>> = self.view.layers.drain(..).collect();
+        let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         for layer in layers.iter_mut() {
-            layer.build(self)?;
+            layer.refresh(self)?;
         }
         self.view.layers = layers;
 
@@ -202,22 +207,25 @@ where
     }
 
     fn queue(&mut self) -> Result<&mut Self> {
-        let layers: Vec<Layer<D, T>> = self.view.layers.drain(..).collect();
+        queue!(
+            self.view.tm.stdout,
+            cursor::Hide,
+            cursor::MoveTo(0, 0),
+            style::SetBackgroundColor(te::BG_LAYER),
+            terminal::Clear(terminal::ClearType::All),
+        );
+
+        queue!(self.view.tm.stdout, self.view.head);
+
+        let layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         for layer in layers.iter() {
             err_at!(Fatal, queue!(self.view.tm.stdout, layer))?;
         }
         self.view.layers = layers;
 
-        Ok(self)
-    }
+        queue!(self.view.tm.stdout, self.view.status);
 
-    pub fn status_log(&mut self, msg: &str) -> Result<()> {
-        self.view.status.log(msg);
-        err_at!(Fatal, execute!(self.view.tm.stdout, self.view.status))?;
-        if msg.len() > 0 {
-            debug!("Status <- {}", msg);
-        }
-        Ok(())
+        Ok(self)
     }
 
     #[inline]
@@ -227,10 +235,9 @@ where
     }
 }
 
-impl<D, T> Application<D, T>
+impl<S> Application<S>
 where
-    D: Store<T>,
-    T: ToString + FromStr,
+    S: Store,
 {
     #[inline]
     pub fn to_viewport(&self) -> te::Viewport {
@@ -256,6 +263,12 @@ where
     pub fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
         self.date = date;
         self.period = util::date_to_period(date);
+        self
+    }
+
+    #[inline]
+    pub fn send_status(&mut self, msg: &str) -> &mut Self {
+        self.view.status.log(msg);
         self
     }
 

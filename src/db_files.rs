@@ -1,5 +1,4 @@
 use chrono::{self, offset::TimeZone, Datelike};
-use jsondata::Json;
 
 use std::{ffi, fs, path};
 
@@ -23,7 +22,7 @@ impl FileLoc {
 
     fn from_value<V>(parent: &ffi::OsStr, value: &V) -> FileLoc
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let mut pp = path::PathBuf::new();
         pp.push(parent);
@@ -66,27 +65,24 @@ impl FileLoc {
 impl FileLoc {
     fn put<V>(&self, value: V) -> Result<Option<V>>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let old_value = self.to_value().ok();
-        err_at!(
-            IOError,
-            fs::write(&self.0, value.encode()?.to_string().as_bytes())
-        )?;
+        err_at!(IOError, fs::write(&self.0, value.encode()?.as_bytes()))?;
 
         Ok(old_value)
     }
 
     fn get<V>(&self) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         self.to_value()
     }
 
     fn delete<V>(self) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value = self.to_value()?;
         err_at!(IOError, fs::remove_file(&self.0))?;
@@ -103,7 +99,7 @@ impl FileLoc {
 
     fn to_value<V>(&self) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let mut value: V = Default::default();
         let typ = value.to_type();
@@ -163,10 +159,10 @@ impl Db {
     }
 }
 
-impl Store<Json> for Db {
+impl Store for Db {
     fn put<V>(&self, value: V) -> Result<Option<V>>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         match value.to_type().as_str() {
             "company" | "commodity" | "ledger" => {
@@ -183,7 +179,7 @@ impl Store<Json> for Db {
 
     fn get<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -202,7 +198,7 @@ impl Store<Json> for Db {
 
     fn delete<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -243,7 +239,7 @@ impl MetadataDir {
 
     pub fn put<V>(&self, value: V) -> Result<Option<V>>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let typ = value.to_type();
         if !Self::TYPES.contains(&typ.as_str()) {
@@ -256,7 +252,7 @@ impl MetadataDir {
 
     pub fn get<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -271,7 +267,7 @@ impl MetadataDir {
 
     pub fn delete<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -286,7 +282,7 @@ impl MetadataDir {
 
     pub fn iter<V>(&self) -> Result<impl Iterator<Item = V>>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
@@ -305,7 +301,7 @@ impl JournalDir {
 
     fn put<V>(&self, value: V) -> Result<Option<V>>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let typ = value.to_type();
         if !Self::TYPES.contains(&typ.as_str()) {
@@ -321,7 +317,7 @@ impl JournalDir {
 
     pub fn get<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -336,7 +332,7 @@ impl JournalDir {
 
     pub fn delete<V>(&self, key: &str) -> Result<V>
     where
-        V: Durable<Json>,
+        V: Durable,
     {
         let value: V = Default::default();
 
@@ -412,7 +408,7 @@ impl Iterator for IterTransaction {
 
 struct JournalYears<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     journal_dir: ffi::OsString,
     from: chrono::Date<chrono::Utc>,
@@ -422,7 +418,7 @@ where
 
 impl<V> JournalYears<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYears<V> {
         JournalYears {
@@ -436,7 +432,7 @@ where
 
 impl<V> Iterator for JournalYears<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     type Item = Result<V>;
 
@@ -462,7 +458,7 @@ where
 
 struct JournalYear<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     year_dir: ffi::OsString,
     months: Vec<u32>,
@@ -471,7 +467,7 @@ where
 
 impl<V> JournalYear<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     fn new(journal_dir: ffi::OsString, from: chrono::Date<chrono::Utc>) -> JournalYear<V> {
         let year_dir = {
@@ -491,7 +487,7 @@ where
 
 impl<V> Iterator for JournalYear<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     type Item = Result<V>;
 
@@ -517,7 +513,7 @@ where
 
 struct JournalMonth<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     month_dir: ffi::OsString,
     days: Vec<u32>,
@@ -526,7 +522,7 @@ where
 
 impl<V> JournalMonth<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     fn new(year_dir: ffi::OsString, month: u32) -> JournalMonth<V> {
         let month_dir = {
@@ -545,7 +541,7 @@ where
 
 impl<V> Iterator for JournalMonth<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     type Item = Result<V>;
 
@@ -574,7 +570,7 @@ where
 
 struct JournalDay<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     _day_dir: ffi::OsString,
     txns: Vec<V>,
@@ -582,7 +578,7 @@ where
 
 impl<V> JournalDay<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     fn new(month_dir: ffi::OsString, day: u32) -> Option<JournalDay<V>> {
         let day_dir = {
@@ -629,7 +625,7 @@ where
 
 impl<V> Iterator for JournalDay<V>
 where
-    V: Ord + Durable<Json>,
+    V: Ord + Durable,
 {
     type Item = Result<V>;
 

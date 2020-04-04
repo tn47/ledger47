@@ -4,6 +4,7 @@ use crossterm::{
     style::{self, Color},
     Command,
 };
+use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
 
 use std::{
@@ -11,7 +12,6 @@ use std::{
     iter::FromIterator,
     ops::{self, RangeBounds},
     result,
-    str::FromStr,
 };
 
 use crate::app::Application;
@@ -23,9 +23,12 @@ pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
 
 pub const BG_LAYER: Color = Color::AnsiValue(236);
+pub const BG_INPUT: Color = Color::AnsiValue(234);
+
+pub const FG_PERIOD: Color = Color::AnsiValue(27);
+pub const FG_DATE: Color = Color::AnsiValue(33);
 pub const FG_TITLE: Color = Color::AnsiValue(6);
 pub const FG_BORDER: Color = Color::AnsiValue(15);
-pub const BG_INPUT: Color = Color::AnsiValue(234);
 pub const FG_INPUT: Color = Color::AnsiValue(15);
 pub const FG_INPUT_NAME: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
@@ -43,37 +46,72 @@ macro_rules! impl_command {
     };
 }
 
-enum Element {
+pub enum Element {
+    HeadLine(HeadLine),
     Title(Title),
     Border(Border),
-    InputLine(InputLine),
     TextLine(TextLine),
+    EditLine(EditLine),
+    EditBox(EditBox),
+    StatusLine(StatusLine),
 }
 
 impl Element {
-    fn contain_cell(&self, col: u16, row: u16) -> bool {
+    pub fn to_string(&self) -> String {
         match self {
-            Element::Title(em) => em.vp.contain_cell(col, row),
-            Element::Border(em) => em.vp.contain_cell(col, row),
-            Element::InputLine(em) => em.vp.contain_cell(col, row),
-            Element::TextLine(em) => em.vp.contain_cell(col, row),
+            Element::HeadLine(em) => em.to_string(),
+            Element::Title(em) => em.to_string(),
+            Element::Border(em) => em.to_string(),
+            Element::EditLine(em) => em.to_string(),
+            Element::EditBox(em) => em.to_string(),
+            Element::TextLine(em) => em.to_string(),
+            Element::StatusLine(em) => em.to_string(),
         }
     }
 
-    pub fn handle_event<D, T>(
+    pub fn contain_cell(&self, col: u16, row: u16) -> bool {
+        match self {
+            Element::HeadLine(em) => em.vp.contain_cell(col, row),
+            Element::Title(em) => em.vp.contain_cell(col, row),
+            Element::Border(em) => em.vp.contain_cell(col, row),
+            Element::EditLine(em) => em.vp.contain_cell(col, row),
+            Element::EditBox(em) => em.vp.contain_cell(col, row),
+            Element::TextLine(em) => em.vp.contain_cell(col, row),
+            Element::StatusLine(em) => em.vp.contain_cell(col, row),
+        }
+    }
+
+    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        match self {
+            Element::HeadLine(em) => em.refresh(app),
+            Element::Title(em) => em.refresh(app),
+            Element::Border(em) => em.refresh(app),
+            Element::EditLine(em) => em.refresh(app),
+            Element::EditBox(em) => em.refresh(app),
+            Element::TextLine(em) => em.refresh(app),
+            Element::StatusLine(em) => em.refresh(app),
+        }
+    }
+
+    pub fn handle_event<S>(
         &mut self,
-        app: &mut Application<D, T>,
+        app: &mut Application<S>,
         evnt: Event,
     ) -> Result<Option<Event>>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
     {
         match self {
+            Element::HeadLine(em) => em.handle_event(app, evnt),
             Element::Title(em) => em.handle_event(app, evnt),
             Element::Border(em) => em.handle_event(app, evnt),
-            Element::InputLine(em) => em.handle_event(app, evnt),
+            Element::EditLine(em) => em.handle_event(app, evnt),
+            Element::EditBox(em) => em.handle_event(app, evnt),
             Element::TextLine(em) => em.handle_event(app, evnt),
+            Element::StatusLine(em) => em.handle_event(app, evnt),
         }
     }
 }
@@ -225,44 +263,36 @@ impl Viewport {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct HeadLine {
     vp: Viewport,
-    line: String,
+    date: chrono::Date<chrono::Local>,
+    period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 }
 
 impl_command!(HeadLine);
 
 impl HeadLine {
-    pub fn new<D, T>(vp: Viewport, app: &Application<D, T>) -> Result<HeadLine>
+    pub fn new<S>(vp: Viewport, app: &Application<S>) -> Result<HeadLine>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
     {
-        use std::iter::repeat;
+        let date = app.to_local_date();
+        let period = app.to_local_period();
 
-        let s_date = app.to_local_date().format("%d-%b-%y");
-        let s_per0 = app.to_local_period().0.format("%d-%b-%y");
-        let s_per1 = app.to_local_period().1.format("%d-%b-%y");
-
-        let part0 = format!("{}/{} {}", s_per0, s_per1, s_date);
-        let mut line = {
-            let (_, width) = vp.to_size();
-            String::from_iter(repeat(' ').take((width as usize) - part0.len()))
-        };
-        line.push_str(&part0);
-
-        Ok(HeadLine { vp, line })
+        Ok(HeadLine { vp, date, period })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         Ok(Some(evnt))
     }
@@ -270,17 +300,45 @@ impl HeadLine {
 
 impl fmt::Display for HeadLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        use std::iter::repeat;
+
         let (col, row) = self.vp.to_origin();
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(self.line.clone()).on(BG_LAYER).with(FG_STATUS)
-        )
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "HeadLine::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
+        let s_date = self.date.format("%d-%b-%y").to_string();
+        let ss_date = style::style(&s_date).on(BG_LAYER).with(FG_DATE);
+        let s_per0 = self.period.0.format("%d-%b-%y").to_string();
+        let ss_per0 = style::style(&s_per0).on(BG_LAYER).with(FG_PERIOD);
+        let s_per1 = self.period.1.format("%d-%b-%y").to_string();
+        let ss_per1 = style::style(&s_per1).on(BG_LAYER).with(FG_PERIOD);
+
+        let mut line = {
+            let n = (width as usize) - s_per0.len() - s_per1.len() - s_date.len() - 3;
+            String::from_iter(repeat(' ').take(n))
+        };
+        line.push_str(&format!(
+            "{}{}{}{}{}",
+            ss_per0,
+            style::style("..").on(BG_LAYER).with(FG_BORDER),
+            ss_per1,
+            style::style(" ").on(BG_LAYER).with(FG_BORDER),
+            ss_date
+        ));
+
+        write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
+        write!(f, "{}", line)
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Title {
     vp: Viewport,
     content: String,
@@ -294,14 +352,16 @@ impl Title {
         Ok(Title { vp, content })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         Ok(Some(evnt))
     }
@@ -310,7 +370,16 @@ impl Title {
 impl fmt::Display for Title {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.vp.to_origin();
-        write!(f, "{}", cursor::Hide)?;
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "Title::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
         write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
         write!(
             f,
@@ -322,7 +391,7 @@ impl fmt::Display for Title {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Border {
     vp: Viewport,
 }
@@ -334,14 +403,16 @@ impl Border {
         Ok(Border { vp })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         Ok(Some(evnt))
     }
@@ -356,10 +427,17 @@ impl fmt::Display for Border {
             (c - 1, r - 1)
         };
         let (ht, wd) = self.vp.to_size();
+
+        trace!(
+            "Border::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            ht,
+            wd
+        );
+
         write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
         write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
-
-        write!(f, "{}", cursor::Hide)?;
 
         // top
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
@@ -405,16 +483,6 @@ pub struct TextLine {
 
 impl_command!(TextLine);
 
-impl Default for TextLine {
-    fn default() -> Self {
-        TextLine {
-            vp: Default::default(),
-            content: Default::default(),
-            fg: Color::White,
-        }
-    }
-}
-
 impl TextLine {
     pub fn new(vp: Viewport, content: &str, fg: Color) -> Result<TextLine> {
         Ok(TextLine {
@@ -424,14 +492,16 @@ impl TextLine {
         })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         Ok(Some(evnt))
     }
@@ -440,6 +510,16 @@ impl TextLine {
 impl fmt::Display for TextLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.vp.to_origin();
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "TextLine::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
@@ -451,7 +531,7 @@ impl fmt::Display for TextLine {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct StatusLine {
     vp: Viewport,
     line: String,
@@ -471,29 +551,30 @@ impl StatusLine {
     }
 
     pub fn log(&mut self, msg: &str) {
-        let (_, width) = self.vp.to_size();
-        let (mut w, w1) = (width - 11, (width - 11) as usize);
-        let s = String::from_iter(msg.chars().rev().take_while(|ch| {
-            w -= ch.width().unwrap() as u16;
-            w > 0
-        }));
+        use std::iter::repeat;
 
-        self.line = format!(
-            "{:width$} {}",
-            s,
-            chrono::Local::now().format("%d-%b-%y"),
-            width = w1,
-        );
+        if msg.len() > 0 {
+            debug!("Status <- {}", msg);
+        }
+
+        let (_, width) = self.vp.to_size();
+        self.line = msg.to_string();
+        if self.line.len() < (width as usize) {
+            let n = (width as usize) - self.line.len();
+            self.line += &String::from_iter(repeat(' ').take(n));
+        }
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         Ok(Some(evnt))
     }
@@ -502,7 +583,17 @@ impl StatusLine {
 impl fmt::Display for StatusLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.vp.to_origin();
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "StatusLine::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
+        write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
         write!(
             f,
             "{}",
@@ -511,33 +602,35 @@ impl fmt::Display for StatusLine {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct InputLine {
+#[derive(Clone)]
+pub struct EditLine {
     vp: Viewport,
     prefix: String,
     buffer: Buffer,
 }
 
-impl_command!(InputLine);
+impl_command!(EditLine);
 
-impl InputLine {
-    pub fn new(vp: Viewport, prefix: &str) -> Result<InputLine> {
+impl EditLine {
+    pub fn new(vp: Viewport, prefix: &str) -> Result<EditLine> {
         let bytes: Vec<u8> = vec![];
-        Ok(InputLine {
+        Ok(EditLine {
             vp,
             prefix: prefix.to_string(),
             buffer: Buffer::empty()?.change_to_insert(),
         })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         match evnt {
             Event::Key {
@@ -552,12 +645,20 @@ impl InputLine {
     }
 }
 
-impl fmt::Display for InputLine {
+impl fmt::Display for EditLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         use std::iter::repeat;
 
         let (col, row) = self.vp.to_origin();
-        let (_, width) = self.vp.to_size();
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "EditLine::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
 
         let n_prefix = self
             .prefix
@@ -565,7 +666,6 @@ impl fmt::Display for InputLine {
             .map(|c| c.width().unwrap_or(0))
             .sum::<usize>() as u16;
 
-        write!(f, "{}", cursor::Hide)?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,
@@ -586,33 +686,35 @@ impl fmt::Display for InputLine {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct InputBox {
+#[derive(Clone)]
+pub struct EditBox {
     vp: Viewport,
     prefix: String,
     buffer: Buffer,
 }
 
-impl_command!(InputBox);
+impl_command!(EditBox);
 
-impl InputBox {
-    pub fn new(vp: Viewport, prefix: &str) -> Result<InputBox> {
+impl EditBox {
+    pub fn new(vp: Viewport, prefix: &str) -> Result<EditBox> {
         let mut buffer = Buffer::empty()?.change_to_insert();
-        Ok(InputBox {
+        Ok(EditBox {
             vp,
             prefix: prefix.to_string(),
             buffer,
         })
     }
 
-    fn handle_event<D, T>(
-        &mut self,
-        _app: &mut Application<D, T>,
-        evnt: Event,
-    ) -> Result<Option<Event>>
+    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
-        D: Store<T>,
-        T: ToString + FromStr,
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
     {
         match evnt {
             Event::Key {
@@ -627,12 +729,20 @@ impl InputBox {
     }
 }
 
-impl fmt::Display for InputBox {
+impl fmt::Display for EditBox {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         use std::iter::repeat;
 
         let (col, row) = self.vp.to_origin();
         let (height, width) = self.vp.to_size();
+
+        trace!(
+            "EditBox::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
 
         let n_prefix = self
             .prefix
@@ -640,7 +750,6 @@ impl fmt::Display for InputBox {
             .map(|c| c.width().unwrap_or(0))
             .sum::<usize>() as u16;
 
-        write!(f, "{}", cursor::Hide)?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(
             f,

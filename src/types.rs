@@ -4,40 +4,66 @@ use uuid;
 
 use std::{cmp, convert::TryInto};
 
-use crate::core::{Durable, Error, Result};
+use crate::core::{Durable, Error, Result, Store};
+
+pub type Key = String;
+
+struct Group {
+    name: String,
+}
+
+impl From<String> for Group {
+    fn from(name: String) -> Group {
+        Group { name }
+    }
+}
+
+impl From<Group> for String {
+    fn from(g: Group) -> String {
+        g.name
+    }
+}
 
 #[derive(Clone, JsonSerialize)]
 pub struct Workspace {
     name: String,
-}
-
-impl From<String> for Workspace {
-    fn from(name: String) -> Workspace {
-        Workspace { name }
-    }
-}
-
-impl From<Workspace> for String {
-    fn from(w: Workspace) -> String {
-        w.name
-    }
+    commodity: Key,
 }
 
 impl Default for Workspace {
     fn default() -> Workspace {
         Workspace {
             name: Default::default(),
+            commodity: Default::default(),
         }
     }
 }
 
 impl Workspace {
     fn new(name: String) -> Workspace {
-        Workspace { name }
+        let mut w: Workspace = Default::default();
+        w.name = name;
+        w
+    }
+
+    fn set_commodity(mut self, commodity: Key) -> Self {
+        self.commodity = commodity;
+        self
+    }
+
+    fn to_name(&self) -> String {
+        self.name.to_string()
+    }
+
+    fn to_commodity<S>(&self, store: S) -> Result<Commodity>
+    where
+        S: Store,
+    {
+        store.get(&self.commodity)
     }
 }
 
-impl Durable<Json> for Workspace {
+impl Durable for Workspace {
     fn to_type(&self) -> String {
         "workspace".to_string()
     }
@@ -46,8 +72,9 @@ impl Durable<Json> for Workspace {
         self.to_type()
     }
 
-    fn encode(&self) -> Result<Json> {
-        Ok(err_at!(ConvertFail, self.clone().try_into())?)
+    fn encode(&self) -> Result<String> {
+        let jval: Json = err_at!(ConvertFail, self.clone().try_into())?;
+        Ok(jval.to_string())
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
@@ -61,6 +88,8 @@ impl Durable<Json> for Workspace {
 pub struct Commodity {
     name: String,
     value: f64,
+    symbol: String,
+    aliases: Vec<String>,
     tags: Vec<String>,
     note: String,
 }
@@ -82,6 +111,8 @@ impl Default for Commodity {
         Commodity {
             name: Default::default(),
             value: Default::default(),
+            symbol: Default::default(),
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
         }
@@ -93,8 +124,36 @@ impl Commodity {
         Commodity {
             name,
             value,
+            symbol: Default::default(),
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
+        }
+    }
+
+    fn set_symbol(mut self, symbol: String) -> Commodity {
+        self.symbol = symbol;
+        self
+    }
+
+    fn has_alias(&self, alias: &str) -> bool {
+        self.aliases.iter().any(|a| a == alias)
+    }
+
+    fn add_alias(&mut self, alias: &str) {
+        if !self.has_alias(alias) {
+            self.aliases.push(alias.to_string())
+        }
+
+        self.aliases.sort();
+    }
+
+    fn remove_alias(&mut self, alias: &str) {
+        for i in 0..self.aliases.len() {
+            if self.aliases[i] == alias {
+                self.aliases.remove(i);
+                break;
+            }
         }
     }
 
@@ -124,7 +183,7 @@ impl Commodity {
     }
 }
 
-impl Durable<Json> for Commodity {
+impl Durable for Commodity {
     fn to_type(&self) -> String {
         "commodity".to_string()
     }
@@ -133,8 +192,9 @@ impl Durable<Json> for Commodity {
         format!("{}-{}", self.to_type(), self.name)
     }
 
-    fn encode(&self) -> Result<Json> {
-        Ok(err_at!(ConvertFail, self.clone().try_into())?)
+    fn encode(&self) -> Result<String> {
+        let jval: Json = err_at!(ConvertFail, self.clone().try_into())?;
+        Ok(jval.to_string())
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
@@ -149,6 +209,7 @@ pub struct Company {
     name: String,
     #[json(to_string)]
     created: chrono::DateTime<chrono::Utc>,
+    aliases: Vec<String>,
     tags: Vec<String>,
     note: String,
 }
@@ -158,6 +219,7 @@ impl Default for Company {
         Company {
             name: Default::default(),
             created: chrono::Utc::now(),
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
         }
@@ -169,8 +231,30 @@ impl Company {
         Company {
             name,
             created,
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
+        }
+    }
+
+    fn has_alias(&self, alias: &str) -> bool {
+        self.aliases.iter().any(|a| a == alias)
+    }
+
+    fn add_alias(&mut self, alias: &str) {
+        if !self.has_alias(alias) {
+            self.aliases.push(alias.to_string())
+        }
+
+        self.aliases.sort();
+    }
+
+    fn remove_alias(&mut self, alias: &str) {
+        for i in 0..self.aliases.len() {
+            if self.aliases[i] == alias {
+                self.aliases.remove(i);
+                break;
+            }
         }
     }
 
@@ -200,7 +284,7 @@ impl Company {
     }
 }
 
-impl Durable<Json> for Company {
+impl Durable for Company {
     fn to_type(&self) -> String {
         "company".to_string()
     }
@@ -209,8 +293,9 @@ impl Durable<Json> for Company {
         format!("{}-{}", self.to_type(), self.name)
     }
 
-    fn encode(&self) -> Result<Json> {
-        Ok(err_at!(ConvertFail, self.clone().try_into())?)
+    fn encode(&self) -> Result<String> {
+        let jval: Json = err_at!(ConvertFail, self.clone().try_into())?;
+        Ok(jval.to_string())
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
@@ -225,6 +310,9 @@ pub struct Ledger {
     name: String,
     #[json(to_string)]
     created: chrono::DateTime<chrono::Utc>,
+    company: Key,
+
+    aliases: Vec<String>,
     tags: Vec<String>,
     note: String,
 }
@@ -234,6 +322,8 @@ impl Default for Ledger {
         Ledger {
             name: Default::default(),
             created: chrono::Utc::now(),
+            company: Default::default(),
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
         }
@@ -241,12 +331,35 @@ impl Default for Ledger {
 }
 
 impl Ledger {
-    fn new(name: String, created: chrono::DateTime<chrono::Utc>) -> Ledger {
+    fn new(name: String, created: chrono::DateTime<chrono::Utc>, company: Key) -> Ledger {
         Ledger {
             name,
             created,
+            company,
+            aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
+        }
+    }
+
+    fn has_alias(&self, alias: &str) -> bool {
+        self.aliases.iter().any(|a| a == alias)
+    }
+
+    fn add_alias(&mut self, alias: &str) {
+        if !self.has_alias(alias) {
+            self.aliases.push(alias.to_string())
+        }
+
+        self.aliases.sort();
+    }
+
+    fn remove_alias(&mut self, alias: &str) {
+        for i in 0..self.aliases.len() {
+            if self.aliases[i] == alias {
+                self.aliases.remove(i);
+                break;
+            }
         }
     }
 
@@ -276,17 +389,18 @@ impl Ledger {
     }
 }
 
-impl Durable<Json> for Ledger {
+impl Durable for Ledger {
     fn to_type(&self) -> String {
         "ledger".to_string()
     }
 
     fn to_key(&self) -> String {
-        format!("{}-{}", self.to_type(), self.name)
+        format!("{}-{}-{}", self.to_type(), self.company, self.name)
     }
 
-    fn encode(&self) -> Result<Json> {
-        Ok(err_at!(ConvertFail, self.clone().try_into())?)
+    fn encode(&self) -> Result<String> {
+        let jval: Json = err_at!(ConvertFail, self.clone().try_into())?;
+        Ok(jval.to_string())
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {
@@ -298,14 +412,14 @@ impl Durable<Json> for Ledger {
 
 #[derive(Clone, JsonSerialize)]
 pub(crate) struct Creditor {
-    ledger: String,
-    commodity: (String, f64),
+    ledger: Key,
+    commodity: (Key, f64),
 }
 
 #[derive(Clone, JsonSerialize)]
 pub(crate) struct Debitor {
-    ledger: String,
-    commodity: (String, f64),
+    ledger: Key,
+    commodity: (Key, f64),
 }
 
 #[derive(Clone, JsonSerialize)]
@@ -367,11 +481,11 @@ impl Transaction {
         }
     }
 
-    fn add_creditor(&mut self, ledger: String, commodity: (String, f64)) {
+    fn add_creditor(&mut self, ledger: Key, commodity: (Key, f64)) {
         self.creditors.push(Creditor { ledger, commodity });
     }
 
-    fn add_debitor(&mut self, ledger: String, commodity: (String, f64)) {
+    fn add_debitor(&mut self, ledger: Key, commodity: (Key, f64)) {
         self.debitors.push(Debitor { ledger, commodity });
     }
 
@@ -401,7 +515,7 @@ impl Transaction {
     }
 }
 
-impl Durable<Json> for Transaction {
+impl Durable for Transaction {
     fn to_type(&self) -> String {
         "transaction".to_string()
     }
@@ -417,8 +531,9 @@ impl Durable<Json> for Transaction {
         )
     }
 
-    fn encode(&self) -> Result<Json> {
-        Ok(err_at!(ConvertFail, self.clone().try_into())?)
+    fn encode(&self) -> Result<String> {
+        let jval: Json = err_at!(ConvertFail, self.clone().try_into())?;
+        Ok(jval.to_string())
     }
 
     fn decode(&mut self, from: &str) -> Result<()> {

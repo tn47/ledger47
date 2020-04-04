@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use ropey::Rope;
 
-use std::{io, mem};
+use std::io;
 
 use crate::event::Event;
 use ledger::core::{Error, Result};

@@ -1,4 +1,4 @@
-use crossterm::Command;
+use crossterm::Command as TermCommand;
 use log::trace;
 use unicode_width::UnicodeWidthStr;
 
@@ -33,7 +33,7 @@ where
     }
 }
 
-impl<S> Command for Layer<S>
+impl<S> TermCommand for Layer<S>
 where
     S: Store,
 {
@@ -131,7 +131,7 @@ where
     }
 }
 
-impl<S> Command for NewWorkspace<S>
+impl<S> TermCommand for NewWorkspace<S>
 where
     S: Store,
 {

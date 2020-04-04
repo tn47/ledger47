@@ -2,7 +2,7 @@ use crossterm::{
     cursor,
     event::KeyCode,
     style::{self, Color},
-    Command,
+    Command as TermCommand,
 };
 use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
@@ -36,7 +36,7 @@ pub const FG_STATUS: Color = Color::AnsiValue(15);
 
 macro_rules! impl_command {
     ($e:tt) => {
-        impl Command for $e {
+        impl TermCommand for $e {
             type AnsiType = String;
 
             fn ansi_code(&self) -> Self::AnsiType {

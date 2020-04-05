@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::KeyCode,
+    event::{Event, KeyCode, KeyEvent},
     style::{self, Color},
     Command as TermCommand,
 };
@@ -14,8 +14,8 @@ use std::{
     result,
 };
 
-use crate::{app::Application, edit_buffer::Buffer, event::Event, util};
-use ledger::core::{Error, Result, Store};
+use crate::{app::Application, edit_buffer::Buffer, util};
+use ledger::core::{Result, Store};
 
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
@@ -771,10 +771,10 @@ impl EditLine {
         S: Store,
     {
         match evnt {
-            Event::Key {
+            Event::Key(KeyEvent {
                 code: KeyCode::Enter,
                 ..
-            } => Ok(Some(evnt)),
+            }) => Ok(Some(evnt)),
             evnt => {
                 let er = self.buffer.handle_event(evnt)?;
                 Ok(er.evnt)
@@ -884,10 +884,10 @@ impl EditBox {
         S: Store,
     {
         match evnt {
-            Event::Key {
+            Event::Key(KeyEvent {
                 code: KeyCode::Enter,
                 ..
-            } => Ok(Some(evnt)),
+            }) => Ok(Some(evnt)),
             evnt => {
                 let er = self.buffer.handle_event(evnt)?;
                 Ok(er.evnt)

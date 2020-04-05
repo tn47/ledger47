@@ -1,11 +1,10 @@
-use crossterm::Command as TermCommand;
+use crossterm::{event::Event, Command as TermCommand};
 use log::trace;
 use unicode_width::UnicodeWidthStr;
 
 use std::marker;
 
 use crate::app::Application;
-use crate::event::Event;
 use crate::term_elements::{self as te};
 use ledger::core::{Result, Store};
 

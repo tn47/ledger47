@@ -1,7 +1,7 @@
 use chrono;
 use crossterm::{
     cursor,
-    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, KeyCode},
+    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
     execute, queue, style,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -12,7 +12,6 @@ use std::{
     io::{self, Write},
 };
 
-use crate::event::Event;
 use crate::term_elements as te;
 use crate::term_layers::{self as tl, Layer};
 use crate::util;
@@ -164,17 +163,17 @@ where
                 None => (),
             }
 
-            let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
+            let evnt = err_at!(Fatal, ct_event::read())?;
 
-            trace!("Event-{}", evnt);
+            trace!("Event-{:?}", evnt);
 
             match evnt {
                 Event::Resize { .. } => (),
                 evnt => match self.handle_event(evnt)? {
-                    Some(Event::Key {
+                    Some(Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),
                         modifiers,
-                    }) if modifiers.is_empty() => break Ok(()),
+                    })) if modifiers.is_empty() => break Ok(()),
                     _ => (),
                 },
             };

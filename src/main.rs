@@ -95,7 +95,10 @@ fn init_logger(opts: &Opt) -> Result<()> {
 
     let fs = err_at!(Fatal, fs::File::create(&log_file))?;
 
-    simplelog::WriteLogger::init(simplelog::LevelFilter::Trace, config.build(), fs);
+    err_at!(
+        Fatal,
+        simplelog::WriteLogger::init(simplelog::LevelFilter::Trace, config.build(), fs)
+    )?;
 
     Ok(())
 }

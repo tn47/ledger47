@@ -26,6 +26,18 @@ where
         }
     }
 
+    pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
+        match self {
+            Layer::NewWorkspace(layer) => layer.focus(app),
+        }
+    }
+
+    pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
+        match self {
+            Layer::NewWorkspace(layer) => layer.leave(app),
+        }
+    }
+
     pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
         match self {
             Layer::NewWorkspace(layer) => layer.handle_event(app, evnt),
@@ -52,6 +64,7 @@ where
 {
     vp: te::Viewport,
     elements: Vec<te::Element>,
+    focus: Option<usize>,
 
     _phantom_s: marker::PhantomData<S>,
 }
@@ -60,6 +73,8 @@ impl<S> NewWorkspace<S>
 where
     S: Store,
 {
+    const DEFAULT_FOCUS: usize = 2;
+
     pub fn new(app: &mut Application<S>) -> Result<NewWorkspace<S>> {
         let vp = app.to_viewport();
 
@@ -74,29 +89,29 @@ where
         };
         let ws_input_name = {
             let inline = "Enter workspace name, only alphanumeric and '_'";
-            let input_vp = vp.clone().move_by(2, 3).resize_to(1, 70);
+            let input_vp = vp.clone().move_by(5, 3).resize_to(1, 70);
             te::EditLine::new(input_vp, inline).ok().unwrap()
         };
         let comm_head = {
             let content = "Enter default commodity details";
-            let comm_vp = vp.clone().move_by(2, 5).resize_to(1, 60);
+            let comm_vp = vp.clone().move_by(5, 5).resize_to(1, 60);
             te::TextLine::new(comm_vp, content, te::FG_SECTION)
                 .ok()
                 .unwrap()
         };
         let comm_input_name = {
             let inline = "Name of the commodity, only alphanumeric";
-            let comm_vp = vp.clone().move_by(5, 7).resize_to(1, 60);
+            let comm_vp = vp.clone().move_by(8, 7).resize_to(1, 60);
             te::EditLine::new(comm_vp, inline).ok().unwrap()
         };
         let comm_tags = {
             let inline = "List of tags, EG: money.asia,exchange.westernunion";
-            let comm_vp = vp.clone().move_by(5, 9).resize_to(1, 60);
+            let comm_vp = vp.clone().move_by(8, 9).resize_to(1, 60);
             te::EditLine::new(comm_vp, inline).ok().unwrap()
         };
         let comm_input_notes = {
             let inline = "Any notes for user consumption";
-            let comm_vp = vp.clone().move_by(5, 11).resize_to(10, 60);
+            let comm_vp = vp.clone().move_by(8, 11).resize_to(10, 60);
             te::EditBox::new(comm_vp, inline).ok().unwrap()
         };
 
@@ -113,12 +128,35 @@ where
         Ok(NewWorkspace {
             vp,
             elements,
+            focus: Some(Self::DEFAULT_FOCUS),
 
             _phantom_s: marker::PhantomData,
         })
     }
 
-    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
+    pub fn refresh(&mut self, _app: &mut Application<S>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
+        let off = match self.focus {
+            Some(off) => off,
+            None => Self::DEFAULT_FOCUS,
+        };
+        match &mut self.elements[off] {
+            te::Element::EditLine(e) => e.clear_inline()?,
+            te::Element::EditBox(e) => e.clear_inline()?,
+            _ => (),
+        };
+
+        trace!("Focus layer_new_workspace off:{}", off);
+
+        self.elements[off].focus(app)?;
+
+        Ok(())
+    }
+
+    pub fn leave(&mut self, _app: &mut Application<S>) -> Result<()> {
         Ok(())
     }
 

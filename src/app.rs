@@ -10,7 +10,6 @@ use log::{debug, info, trace};
 use std::{
     ffi,
     io::{self, Write},
-    mem,
 };
 
 use crate::event::Event;
@@ -72,9 +71,9 @@ where
         Ok(View {
             tm,
             vp,
-            head: unsafe { mem::zeroed() },
+            head: Default::default(),
             layers: Default::default(),
-            status: unsafe { mem::zeroed() },
+            status: Default::default(),
             focus: ViewFocus::Layer,
         })
     }
@@ -157,12 +156,20 @@ where
         self.refresh()?.queue()?.flush()?;
 
         loop {
+            match self.view.layers.pop() {
+                Some(mut layer) => {
+                    layer.focus(&mut self)?;
+                    self.view.layers.push(layer);
+                }
+                None => (),
+            }
+
             let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
 
             trace!("Event-{}", evnt);
 
             match evnt {
-                Event::Resize { cols, rows } => (),
+                Event::Resize { .. } => (),
                 evnt => match self.handle_event(evnt)? {
                     Some(Event::Key {
                         code: KeyCode::Char('q'),
@@ -207,23 +214,28 @@ where
     }
 
     fn queue(&mut self) -> Result<&mut Self> {
-        queue!(
-            self.view.tm.stdout,
-            cursor::Hide,
-            cursor::MoveTo(0, 0),
-            style::SetBackgroundColor(te::BG_LAYER),
-            terminal::Clear(terminal::ClearType::All),
-        );
+        err_at!(
+            Fatal,
+            queue!(
+                self.view.tm.stdout,
+                cursor::Hide,
+                cursor::MoveTo(0, 0),
+                style::SetBackgroundColor(te::BG_LAYER),
+                terminal::Clear(terminal::ClearType::All),
+            )
+        )?;
 
-        queue!(self.view.tm.stdout, self.view.head);
+        err_at!(Fatal, queue!(self.view.tm.stdout, self.view.head))?;
 
-        let layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
-        for layer in layers.iter() {
-            err_at!(Fatal, queue!(self.view.tm.stdout, layer))?;
+        match self.view.layers.pop() {
+            Some(layer) => {
+                err_at!(Fatal, queue!(self.view.tm.stdout, layer))?;
+                self.view.layers.push(layer);
+            }
+            None => (),
         }
-        self.view.layers = layers;
 
-        queue!(self.view.tm.stdout, self.view.status);
+        err_at!(Fatal, queue!(self.view.tm.stdout, self.view.status))?;
 
         Ok(self)
     }
@@ -279,6 +291,27 @@ where
     ) -> &mut Self {
         self.period = period;
         self
+    }
+
+    pub fn show_cursor_at(&mut self, col: u16, row: u16) -> Result<()> {
+        err_at!(
+            Fatal,
+            execute!(
+                self.view.tm.stdout,
+                cursor::MoveTo(col - 1, row - 1),
+                cursor::EnableBlinking,
+                cursor::Show,
+            )
+        )?;
+        err_at!(Fatal, self.view.tm.stdout.flush())?;
+
+        trace!(
+            "show cursor {:?}->{:?}",
+            cursor::position(),
+            (col - 1, row - 1)
+        );
+
+        Ok(())
     }
 }
 

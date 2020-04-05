@@ -153,7 +153,7 @@ impl Db {
         err_at!(IOError, fs::create_dir_all(&db.to_journal_dir().0))?;
 
         let file_loc = FileLoc::from_key(&dir, "workspace");
-        file_loc.put(db.w.clone());
+        file_loc.put(db.w.clone())?;
 
         Ok(db)
     }

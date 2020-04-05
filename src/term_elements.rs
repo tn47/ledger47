@@ -14,10 +14,8 @@ use std::{
     result,
 };
 
-use crate::app::Application;
-use crate::edit_buffer::Buffer;
-use crate::event::Event;
-use ledger::core::{Result, Store};
+use crate::{app::Application, edit_buffer::Buffer, event::Event, util};
+use ledger::core::{Error, Result, Store};
 
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;
@@ -93,6 +91,36 @@ impl Element {
             Element::EditBox(em) => em.refresh(app),
             Element::TextLine(em) => em.refresh(app),
             Element::StatusLine(em) => em.refresh(app),
+        }
+    }
+
+    pub fn focus<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        match self {
+            Element::HeadLine(em) => em.focus(app),
+            Element::Title(em) => em.focus(app),
+            Element::Border(em) => em.focus(app),
+            Element::EditLine(em) => em.focus(app),
+            Element::EditBox(em) => em.focus(app),
+            Element::TextLine(em) => em.focus(app),
+            Element::StatusLine(em) => em.focus(app),
+        }
+    }
+
+    pub fn leave<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        match self {
+            Element::HeadLine(em) => em.leave(app),
+            Element::Title(em) => em.leave(app),
+            Element::Border(em) => em.leave(app),
+            Element::EditLine(em) => em.leave(app),
+            Element::EditBox(em) => em.leave(app),
+            Element::TextLine(em) => em.leave(app),
+            Element::StatusLine(em) => em.leave(app),
         }
     }
 
@@ -270,6 +298,16 @@ pub struct HeadLine {
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 }
 
+impl Default for HeadLine {
+    fn default() -> Self {
+        HeadLine {
+            vp: Default::default(),
+            date: chrono::Local::now().date(),
+            period: util::date_to_period(chrono::Local::now().date()),
+        }
+    }
+}
+
 impl_command!(HeadLine);
 
 impl HeadLine {
@@ -284,6 +322,21 @@ impl HeadLine {
     }
 
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus headline");
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
@@ -359,6 +412,21 @@ impl Title {
         Ok(())
     }
 
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus title");
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
     fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
     where
         S: Store,
@@ -410,6 +478,21 @@ impl Border {
         Ok(())
     }
 
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus border");
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
     fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
     where
         S: Store,
@@ -422,10 +505,7 @@ impl fmt::Display for Border {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         use std::iter::repeat;
 
-        let (col, row) = {
-            let (c, r) = self.vp.to_origin();
-            (c - 1, r - 1)
-        };
+        let (col, row) = self.vp.to_origin();
         let (ht, wd) = self.vp.to_size();
 
         trace!(
@@ -435,6 +515,7 @@ impl fmt::Display for Border {
             ht,
             wd
         );
+        let (col, row) = (col - 1, row - 1);
 
         write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
         write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
@@ -499,6 +580,21 @@ impl TextLine {
         Ok(())
     }
 
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus text-line");
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
     fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
     where
         S: Store,
@@ -520,7 +616,7 @@ impl fmt::Display for TextLine {
             width
         );
 
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
         write!(
             f,
             "{}",
@@ -531,7 +627,7 @@ impl fmt::Display for TextLine {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct StatusLine {
     vp: Viewport,
     line: String,
@@ -566,6 +662,21 @@ impl StatusLine {
     }
 
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus status-line");
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
@@ -613,7 +724,6 @@ impl_command!(EditLine);
 
 impl EditLine {
     pub fn new(vp: Viewport, inline: &str) -> Result<EditLine> {
-        let bytes: Vec<u8> = vec![];
         Ok(EditLine {
             vp,
             inline: inline.to_string(),
@@ -621,7 +731,35 @@ impl EditLine {
         })
     }
 
+    pub fn clear_inline(&mut self) -> Result<()> {
+        self.inline.clear();
+        Ok(())
+    }
+
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn focus<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
+            ((col, row), Some((c, r))) => (col + c, row + r),
+            ((col, row), None) => (col, row),
+        };
+        trace!(
+            "Focus edit-line {:?} {:?}",
+            self.vp.to_origin(),
+            self.vp.to_cursor()
+        );
+        app.show_cursor_at(col, row)
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
@@ -659,6 +797,7 @@ impl fmt::Display for EditLine {
             height,
             width
         );
+        let (col, row) = (col - 1, row - 1);
 
         let view_line = String::from_iter(repeat(' ').take(width as usize));
         let inline = {
@@ -702,15 +841,38 @@ impl_command!(EditBox);
 
 impl EditBox {
     pub fn new(vp: Viewport, inline: &str) -> Result<EditBox> {
-        let mut buffer = Buffer::empty()?.change_to_insert();
         Ok(EditBox {
             vp,
             inline: inline.to_string(),
-            buffer,
+            buffer: Buffer::empty()?.change_to_insert(),
         })
     }
 
+    pub fn clear_inline(&mut self) -> Result<()> {
+        self.inline.clear();
+        Ok(())
+    }
+
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        Ok(())
+    }
+
+    fn focus<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus edit-box");
+        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
+            ((col, row), Some((c, r))) => (col + c, row + r),
+            ((col, row), None) => (col, row),
+        };
+        app.show_cursor_at(col, row)
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {

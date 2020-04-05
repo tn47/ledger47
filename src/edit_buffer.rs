@@ -264,7 +264,7 @@ impl Buffer {
         }
     }
 
-    fn do_key_backtab(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+    fn do_key_backtab(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
         Ok(EditRes::new(None, 0, Some(evnt)))
     }
 
@@ -277,7 +277,7 @@ impl Buffer {
         }
     }
 
-    fn do_key_insert(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+    fn do_key_insert(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
         Ok(EditRes::new(None, 0, Some(evnt)))
     }
 
@@ -294,7 +294,7 @@ impl Buffer {
             match evnt {
                 Event::Key {
                     code: KeyCode::Char(ch),
-                    modifiers,
+                    ..
                 } => {
                     buf.insert_char(*cursor, '\t');
                     *cursor += 1;
@@ -324,7 +324,7 @@ impl Buffer {
     }
 
     pub fn handle_insert_event(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        match evnt {
+        match &evnt {
             Event::Key { code, .. } => match code {
                 KeyCode::Backspace => Self::do_key_backspace(buf, cursor, evnt),
                 KeyCode::Enter => Self::do_key_enter(buf, cursor, evnt),
@@ -340,8 +340,8 @@ impl Buffer {
                 KeyCode::BackTab => Self::do_key_backtab(buf, cursor, evnt),
                 KeyCode::Delete => Self::do_key_delete(buf, cursor, evnt),
                 KeyCode::Insert => Self::do_key_insert(buf, cursor, evnt),
-                KeyCode::F(fkey) => Self::do_key_fkey(buf, cursor, evnt),
-                KeyCode::Char(ch) => Self::do_key_char(buf, cursor, evnt),
+                KeyCode::F(_) => Self::do_key_fkey(buf, cursor, evnt),
+                KeyCode::Char(_) => Self::do_key_char(buf, cursor, evnt),
                 KeyCode::Null => Self::do_key_null(buf, cursor, evnt),
                 KeyCode::Esc => Self::do_key_esc(buf, cursor, evnt),
             },

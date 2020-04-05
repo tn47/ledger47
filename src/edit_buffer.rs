@@ -7,6 +7,65 @@ use ledger::core::{Error, Result};
 
 const NEW_LINE_CHAR: char = '\n';
 
+enum InsertEvent {
+    Noop,
+    Esc,
+    Backspace,
+    Enter,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Tab,
+    BackTab,
+    Delete,
+    Insert,
+    F(u8, KeyModifiers),
+    Char(char, KeyModifiers),
+}
+
+impl From<Event> for InsertEvent {
+    fn from(evnt: Event) -> InsertEvent {
+        match evnt {
+            Event::Key(KeyEvent { code, modifiers }) => match code {
+                KeyCode::Backspace => InsertEvent::Backspace,
+                KeyCode::Enter => InsertEvent::Enter,
+                KeyCode::Left => InsertEvent::Left,
+                KeyCode::Right => InsertEvent::Right,
+                KeyCode::Up => InsertEvent::Up,
+                KeyCode::Down => InsertEvent::Down,
+                KeyCode::Home => InsertEvent::Home,
+                KeyCode::End => InsertEvent::End,
+                KeyCode::PageUp => InsertEvent::PageUp,
+                KeyCode::PageDown => InsertEvent::PageDown,
+                KeyCode::Tab => InsertEvent::Tab,
+                KeyCode::BackTab => InsertEvent::BackTab,
+                KeyCode::Delete => InsertEvent::Delete,
+                KeyCode::F(f) => InsertEvent::F(f, modifiers),
+                KeyCode::Char(ch) => InsertEvent::Char(ch, modifiers),
+                KeyCode::Insert | KeyCode::Null => InsertEvent::Noop,
+                KeyCode::Esc => InsertEvent::Esc,
+            },
+            Event::Mouse(_) => InsertEvent::Noop,
+            Event::Resize(_, _) => InsertEvent::Noop,
+        }
+    }
+}
+
+impl InsertEvent {
+    fn to_modifier(evnt: &InsertEvent) -> KeyModifiers {
+        match evnt {
+            InsertEvent::F(f, modifiers) => modifiers.clone(),
+            InsertEvent::Char(ch, modifiers) => modifiers.clone(),
+            _ => KeyModifiers::empty(),
+        }
+    }
+}
+
 pub struct EditRes {
     pub col_at: Option<usize>,
     pub row_by: isize,

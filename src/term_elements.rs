@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent},
+    event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent},
     style::{self, Color},
     Command as TermCommand,
 };
@@ -911,6 +911,8 @@ impl fmt::Display for EditBox {
             width
         );
 
+        let (col, row) = (col - 1, row - 1);
+
         let view_line = String::from_iter(repeat(' ').take(width as usize));
         let inline = {
             let n_inline = cmp::min(
@@ -947,5 +949,25 @@ impl fmt::Display for EditBox {
         }
 
         Ok(())
+    }
+}
+
+pub fn to_modifiers(evnt: &Event) -> KeyModifiers {
+    match evnt {
+        Event::Resize(_, _) => KeyModifiers::empty(),
+        Event::Key(KeyEvent { modifiers, .. }) => modifiers.clone(),
+        Event::Mouse(MouseEvent::Up(_, _, _, modifiers)) => modifiers.clone(),
+        Event::Mouse(MouseEvent::Down(_, _, _, modifiers)) => modifiers.clone(),
+        Event::Mouse(MouseEvent::Drag(_, _, _, modifiers)) => modifiers.clone(),
+        Event::Mouse(MouseEvent::ScrollDown(_, _, modifiers)) => modifiers.clone(),
+        Event::Mouse(MouseEvent::ScrollUp(_, _, modifiers)) => modifiers.clone(),
+    }
+}
+
+pub fn to_key_code(evnt: &Event) -> Option<KeyCode> {
+    match evnt {
+        Event::Resize(_, _) => None,
+        Event::Key(KeyEvent { code, .. }) => Some(code.clone()),
+        Event::Mouse(_) => None,
     }
 }

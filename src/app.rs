@@ -184,17 +184,19 @@ where
     fn handle_event(&mut self, mut evnt: Event) -> Result<Option<Event>> {
         let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         let mut iter = layers.iter_mut().rev();
-        loop {
+        let evnt = loop {
             if let Some(layer) = iter.next() {
                 evnt = match layer.handle_event(self, evnt)? {
                     Some(evnt) => evnt,
-                    None => break Ok(None),
+                    None => break None,
                 }
             } else {
-                self.view.layers = layers;
-                break Ok(Some(evnt));
+                break Some(evnt);
             }
-        }
+        };
+        self.view.layers = layers;
+
+        Ok(evnt)
     }
 
     fn refresh(&mut self) -> Result<&mut Self> {

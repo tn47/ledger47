@@ -1,4 +1,7 @@
-use crossterm::{event::Event, Command as TermCommand};
+use crossterm::{
+    event::{Event, KeyCode},
+    Command as TermCommand,
+};
 use log::trace;
 use unicode_width::UnicodeWidthStr;
 
@@ -63,7 +66,7 @@ where
 {
     vp: te::Viewport,
     elements: Vec<te::Element>,
-    focus: Option<usize>,
+    focus: Vec<usize>,
 
     _phantom_s: marker::PhantomData<S>,
 }
@@ -127,7 +130,7 @@ where
         Ok(NewWorkspace {
             vp,
             elements,
-            focus: Some(Self::DEFAULT_FOCUS),
+            focus: vec![2, 4, 5, 6],
 
             _phantom_s: marker::PhantomData,
         })
@@ -138,10 +141,7 @@ where
     }
 
     pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
-        let off = match self.focus {
-            Some(off) => off,
-            None => Self::DEFAULT_FOCUS,
-        };
+        let off = self.focus.first().unwrap().clone();
         match &mut self.elements[off] {
             te::Element::EditLine(e) => e.clear_inline()?,
             te::Element::EditBox(e) => e.clear_inline()?,
@@ -159,12 +159,26 @@ where
         Ok(())
     }
 
-    pub fn handle_event(
-        &mut self,
-        _app: &mut Application<S>,
-        evnt: Event,
-    ) -> Result<Option<Event>> {
-        Ok(Some(evnt))
+    pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
+        let off = self.focus.first().unwrap().clone();
+        self.elements[off].handle_event(app, evnt);
+
+        match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+            (modifiers, Some(code)) if modifiers.is_empty() => match code {
+                KeyCode::Enter | KeyCode::Tab => {
+                    let off = self.focus.remove(0);
+                    self.focus.push(off);
+                    Ok(None)
+                }
+                KeyCode::BackTab => {
+                    let off = self.focus.pop().unwrap();
+                    self.focus.insert(0, off);
+                    Ok(None)
+                }
+                _ => Ok(Some(evnt)),
+            },
+            _ => Ok(Some(evnt)),
+        }
     }
 }
 

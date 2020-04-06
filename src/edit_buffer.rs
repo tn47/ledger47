@@ -32,24 +32,24 @@ impl From<Event> for InsertEvent {
     fn from(evnt: Event) -> InsertEvent {
         match evnt {
             Event::Key(KeyEvent { code, modifiers }) => match code {
-                KeyCode::Backspace if to_modifier(&evnt).is_empty() => InsertEvent::Backspace,
-                KeyCode::Enter if to_modifier(&evnt).is_empty() => InsertEvent::Enter,
-                KeyCode::Left if to_modifier(&evnt).is_empty() => InsertEvent::Left,
-                KeyCode::Right if to_modifier(&evnt).is_empty() => InsertEvent::Right,
-                KeyCode::Up if to_modifier(&evnt).is_empty() => InsertEvent::Up,
-                KeyCode::Down if to_modifier(&evnt).is_empty() => InsertEvent::Down,
-                KeyCode::Home if to_modifier(&evnt).is_empty() => InsertEvent::Home,
-                KeyCode::End if to_modifier(&evnt).is_empty() => InsertEvent::End,
-                KeyCode::PageUp if to_modifier(&evnt).is_empty() => InsertEvent::PageUp,
-                KeyCode::PageDown if to_modifier(&evnt).is_empty() => InsertEvent::PageDown,
-                KeyCode::Tab if to_modifier(&evnt).is_empty() => InsertEvent::Tab,
-                KeyCode::BackTab if to_modifier(&evnt).is_empty() => InsertEvent::BackTab,
-                KeyCode::Delete if to_modifier(&evnt).is_empty() => InsertEvent::Delete,
-                KeyCode::F(f) if to_modifier(&evnt).is_empty() => InsertEvent::F(f, modifiers),
-                KeyCode::Char(ch) if to_modifier(&evnt).is_empty() => {
+                KeyCode::Backspace if to_modifiers(&evnt).is_empty() => InsertEvent::Backspace,
+                KeyCode::Enter if to_modifiers(&evnt).is_empty() => InsertEvent::Enter,
+                KeyCode::Left if to_modifiers(&evnt).is_empty() => InsertEvent::Left,
+                KeyCode::Right if to_modifiers(&evnt).is_empty() => InsertEvent::Right,
+                KeyCode::Up if to_modifiers(&evnt).is_empty() => InsertEvent::Up,
+                KeyCode::Down if to_modifiers(&evnt).is_empty() => InsertEvent::Down,
+                KeyCode::Home if to_modifiers(&evnt).is_empty() => InsertEvent::Home,
+                KeyCode::End if to_modifiers(&evnt).is_empty() => InsertEvent::End,
+                KeyCode::PageUp if to_modifiers(&evnt).is_empty() => InsertEvent::PageUp,
+                KeyCode::PageDown if to_modifiers(&evnt).is_empty() => InsertEvent::PageDown,
+                KeyCode::Tab if to_modifiers(&evnt).is_empty() => InsertEvent::Tab,
+                KeyCode::BackTab if to_modifiers(&evnt).is_empty() => InsertEvent::BackTab,
+                KeyCode::Delete if to_modifiers(&evnt).is_empty() => InsertEvent::Delete,
+                KeyCode::F(f) if to_modifiers(&evnt).is_empty() => InsertEvent::F(f, modifiers),
+                KeyCode::Char(ch) if to_modifiers(&evnt).is_empty() => {
                     InsertEvent::Char(ch, modifiers)
                 }
-                KeyCode::Esc if to_modifier(&evnt).is_empty() => InsertEvent::Esc,
+                KeyCode::Esc if to_modifiers(&evnt).is_empty() => InsertEvent::Esc,
                 KeyCode::Insert | KeyCode::Null => InsertEvent::Noop,
                 _ => InsertEvent::Noop,
             },
@@ -60,7 +60,7 @@ impl From<Event> for InsertEvent {
 }
 
 impl InsertEvent {
-    fn to_modifier(evnt: &InsertEvent) -> KeyModifiers {
+    fn to_modifiers(evnt: &InsertEvent) -> KeyModifiers {
         match evnt {
             InsertEvent::F(_, modifiers) => modifiers.clone(),
             InsertEvent::Char(_, modifiers) => modifiers.clone(),
@@ -247,7 +247,7 @@ impl From<Event> for NormalEvent {
 }
 
 impl NormalEvent {
-    fn to_modifier(evnt: &NormalEvent) -> KeyModifiers {
+    fn to_modifiers(evnt: &NormalEvent) -> KeyModifiers {
         match evnt {
             NormalEvent::F(_, modifiers) => modifiers.clone(),
             NormalEvent::Char(_, modifiers) => modifiers.clone(),
@@ -312,7 +312,7 @@ impl From<Event> for ReplaceEvent {
 }
 
 impl ReplaceEvent {
-    fn to_modifier(evnt: &ReplaceEvent) -> KeyModifiers {
+    fn to_modifiers(evnt: &ReplaceEvent) -> KeyModifiers {
         match evnt {
             ReplaceEvent::F(_, modifiers) => modifiers.clone(),
             ReplaceEvent::Char(_, modifiers) => modifiers.clone(),
@@ -468,7 +468,7 @@ fn line_first_char(buf: &Rope, cursor: usize) -> usize {
     buf.line_to_char(buf.char_to_line(cursor))
 }
 
-fn to_modifier(evnt: &Event) -> KeyModifiers {
+fn to_modifiers(evnt: &Event) -> KeyModifiers {
     match evnt {
         Event::Resize(_, _) => KeyModifiers::empty(),
         Event::Key(KeyEvent { modifiers, .. }) => modifiers.clone(),

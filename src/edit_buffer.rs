@@ -1,7 +1,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ropey::Rope;
 
-use std::io;
+use std::{cmp, io};
 
 use ledger::core::{Error, Result};
 
@@ -69,6 +69,19 @@ impl InsertEvent {
     }
 }
 
+macro_rules! update_cursor {
+    ($buf:expr, $cursor:expr, $new_cursor:expr, $evnt:expr) => {{
+        let (col_at, row_at) = {
+            let row_at = $buf.char_to_line($new_cursor);
+            let col_at = $new_cursor - $buf.line_to_char(row_at);
+            (col_at, row_at)
+        };
+
+        $cursor = $new_cursor;
+        EditRes::new(col_at, row_at, $evnt)
+    }};
+}
+
 impl InsertEvent {
     fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
         use InsertEvent::{BackTab, Backspace, Char, Delete, Down, End, Enter};
@@ -76,120 +89,84 @@ impl InsertEvent {
         use InsertEvent::{Right, Tab, Up, F};
 
         let res = match self {
-            Backspace if *cursor == 0 => EditRes::new(None, 0, Some(evnt)),
+            Backspace if *cursor == 0 => EditRes::new(0, 0, Some(evnt)),
             Backspace => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                if start_idx == 0 && start_idx == *cursor {
-                    EditRes::new(None, 0, None) // consume as noop
-                } else if start_idx == 0 {
-                    let new_cursor = cursor.saturating_sub(1);
-                    buf.remove(new_cursor..*cursor);
-                    *cursor = new_cursor;
-                    EditRes::new(Some(*cursor - start_idx), 0, None)
-                } else if start_idx == *cursor {
-                    let first_idx = line_first_char(buf, start_idx - 1);
-                    let last_idx = line_last_char(buf, start_idx - 1);
-                    buf.remove((last_idx + 1)..*cursor);
-                    *cursor = last_idx + 1;
-                    EditRes::new(Some(last_idx - first_idx), -1, None)
-                } else {
-                    let first_idx = line_first_char(buf, *cursor);
-                    let new_cursor = cursor.saturating_sub(1);
-                    buf.remove(new_cursor..*cursor);
-                    *cursor = new_cursor;
-                    EditRes::new(Some(first_idx - *cursor), 0, None)
-                }
+                let new_cursor = *cursor - 1;
+                buf.remove(new_cursor..*cursor);
+                update_cursor!(buf, *cursor, new_cursor, None)
             }
             Enter => {
                 buf.insert_char(*cursor, NEW_LINE_CHAR);
-                *cursor += 1;
-                EditRes::new(Some(0), 1, None)
+                update_cursor!(buf, *cursor, *cursor + 1, None)
             }
-            Left => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                if start_idx < *cursor {
-                    *cursor -= 1;
-                }
-                EditRes::new(Some(*cursor - start_idx), 0, None)
-            }
-            Right => {
-                let last_idx = line_last_char(buf, *cursor);
-                let start_idx = line_first_char(buf, *cursor);
-                if last_idx > *cursor {
-                    *cursor += 1;
-                }
-                EditRes::new(Some(*cursor - start_idx), 0, None)
-            }
+            Left => update_cursor!(buf, *cursor, *cursor - 1, None),
+            Right => update_cursor!(buf, *cursor, *cursor + 1, None),
+            Up if *cursor == 0 => EditRes::new(0, 0, Some(evnt)),
             Up => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                let cur_col = *cursor - start_idx;
-                let mut lines = buf.lines_at(buf.char_to_line(*cursor));
-                match lines.prev() {
-                    Some(_) => {
-                        let prev_start_idx = buf.line_to_char(buf.char_to_line(*cursor) - 1);
-                        let prev_last_idx = line_last_char(buf, start_idx);
-                        let col_at = if (prev_last_idx - prev_start_idx) < cur_col {
-                            *cursor = prev_last_idx;
-                            prev_last_idx - prev_start_idx
-                        } else {
-                            *cursor = prev_start_idx + cur_col;
-                            cur_col
+                let line_idx = buf.char_to_line(*cursor);
+                let mut lines = buf.lines_at(line_idx);
+                let (prev_line, cur_line) = (lines.prev(), lines.next());
+                match (prev_line, cur_line) {
+                    (None, _) => update_cursor!(buf, *cursor, *cursor, None),
+                    (Some(pline), Some(cline)) => {
+                        let row_at = line_idx - 1;
+                        let col_at = {
+                            let cur_col_at = *cursor - buf.line_to_char(line_idx);
+                            cmp::min(pline.len_chars(), cur_col_at)
                         };
-                        EditRes::new(Some(col_at), -1, None)
+                        update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
-                    None => EditRes::new(None, 0, None), // consume as noop
+                    _ => err_at!(Fatal, msg: format!("unreachable"))?,
                 }
             }
             Down => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                let cur_col = *cursor - start_idx;
-                let mut lines = buf.lines_at(buf.char_to_line(*cursor));
-                match lines.next() {
-                    Some(_) => {
-                        let next_start_idx = buf.line_to_char(buf.char_to_line(*cursor) + 1);
-                        let next_last_idx = line_last_char(buf, start_idx);
-                        let col_at = if (next_last_idx - next_start_idx) < cur_col {
-                            *cursor = next_last_idx;
-                            next_last_idx - next_start_idx
-                        } else {
-                            *cursor = next_start_idx + cur_col;
-                            cur_col
+                let line_idx = buf.char_to_line(*cursor);
+                let mut lines = buf.lines_at(line_idx);
+                let (cur_line, next_line) = (lines.next(), lines.next());
+                match (cur_line, next_line) {
+                    (None, _) => update_cursor!(buf, *cursor, *cursor, None),
+                    (Some(pline), None) => update_cursor!(buf, *cursor, *cursor, None),
+                    (Some(cline), Some(nline)) => {
+                        let row_at = line_idx + 1;
+                        let col_at = {
+                            let cur_col_at = *cursor - buf.line_to_char(line_idx);
+                            cmp::min(nline.len_chars(), cur_col_at)
                         };
-                        EditRes::new(Some(col_at), 1, None)
+                        update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
-                    None => EditRes::new(None, 0, None), // consume as noop
+                    _ => err_at!(Fatal, msg: format!("unreachable"))?,
                 }
             }
             Home => {
-                *cursor = line_first_char(buf, *cursor);
-                EditRes::new(Some(0), 0, None)
+                let new_cursor = buf.line_to_char(buf.char_to_line(*cursor));
+                update_cursor!(buf, *cursor, new_cursor, None)
             }
             End => {
-                let first_idx = line_first_char(buf, *cursor);
-                *cursor = line_last_char(buf, *cursor);
-                EditRes::new(Some(*cursor - first_idx), 0, None)
+                let (mut lines, start_idx) = {
+                    let line_idx = buf.char_to_line(*cursor);
+                    (buf.lines_at(line_idx), buf.line_to_char(line_idx))
+                };
+                let new_cursor = if let Some(line) = lines.next() {
+                    start_idx + line.len_chars()
+                } else {
+                    *cursor
+                };
+                update_cursor!(buf, *cursor, new_cursor, None)
             }
             Tab => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                let cur_col = *cursor - start_idx;
-
                 buf.insert_char(*cursor, '\t');
-                *cursor += 1;
-                EditRes::new(Some(cur_col + 1), 1, None)
+                update_cursor!(buf, *cursor, *cursor + 1, None)
             }
             Delete => {
                 buf.remove(*cursor..(*cursor + 1));
-                EditRes::new(None, 0, None)
+                update_cursor!(buf, *cursor, *cursor, None)
             }
             Char(ch, _) => {
-                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-                let cur_col = *cursor - start_idx;
-                buf.insert_char(*cursor, *ch);
-                *cursor += 1;
-                EditRes::new(Some(cur_col + 1), 0, None)
+                buf.insert_char(*cursor, '\t');
+                update_cursor!(buf, *cursor, *cursor + 1, None)
             }
             F(_, _) | BackTab | Insert | PageUp | PageDown | Noop | Esc => {
-                EditRes::new(None, 0, Some(evnt))
+                update_cursor!(buf, *cursor, *cursor, Some(evnt))
             }
         };
 
@@ -257,8 +234,8 @@ impl NormalEvent {
 }
 
 impl NormalEvent {
-    fn handle_event(&self, _buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
+    fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+        Ok(update_cursor!(buf, *cursor, *cursor, Some(evnt)))
     }
 }
 
@@ -322,23 +299,23 @@ impl ReplaceEvent {
 }
 
 impl ReplaceEvent {
-    fn handle_event(&self, _buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
+    fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+        Ok(update_cursor!(buf, *cursor, *cursor, Some(evnt)))
     }
 }
 
 pub struct EditRes {
-    pub col_at: Option<usize>,
-    pub row_by: isize,
+    pub col_at: usize,
+    pub row_at: usize,
     pub evnt: Option<Event>,
 }
 
 impl EditRes {
     #[inline]
-    fn new(col_at: Option<usize>, row_by: isize, evnt: Option<Event>) -> EditRes {
+    fn new(col_at: usize, row_at: usize, evnt: Option<Event>) -> EditRes {
         EditRes {
             col_at,
-            row_by,
+            row_at,
             evnt,
         }
     }
@@ -347,9 +324,9 @@ impl EditRes {
 // all bits and pieces of content in a layer/page is managed by buffer.
 #[derive(Clone)]
 pub enum Buffer {
-    Normal { buf: Rope, cursor: usize },
-    Insert { buf: Rope, cursor: usize },
-    Replace { buf: Rope, cursor: usize },
+    Normal { buf: Rope, cursor: usize }, // cursor is char_idx into buffer.
+    Insert { buf: Rope, cursor: usize }, // cursor is char_idx into buffer.
+    Replace { buf: Rope, cursor: usize }, // cursor is char_idx into buffer.
 }
 
 impl Default for Buffer {

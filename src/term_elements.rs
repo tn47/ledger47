@@ -8,13 +8,19 @@ use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
 
 use std::{
-    cmp, fmt,
+    cmp,
+    convert::TryInto,
+    fmt,
     iter::FromIterator,
     ops::{self, RangeBounds},
     result,
 };
 
-use crate::{app::Application, edit_buffer::Buffer, util};
+use crate::{
+    app::Application,
+    edit_buffer::{Buffer, EditRes},
+    util,
+};
 use ledger::core::{Result, Store};
 
 pub const MIN_COL: u64 = 1;
@@ -150,8 +156,8 @@ pub struct Viewport {
     row: u16,
     height: u16,
     width: u16,
-    scroll_off: u16,
-    cursor: Option<(u16, u16)>, // (col-offset, row-offset)
+    ed_origin: (usize, usize), // absolute (col, row) within buffer
+    vp_cursor: (u16, u16),     // (col-offset, row-offset)
 }
 
 impl fmt::Display for Viewport {
@@ -172,15 +178,9 @@ impl Viewport {
             row,
             height,
             width,
-            scroll_off: Default::default(),
-            cursor: None,
+            ed_origin: Default::default(),
+            vp_cursor: Default::default(),
         }
-    }
-
-    #[inline]
-    pub fn set_scroll_off(mut self, scroll_off: u16) -> Self {
-        self.scroll_off = scroll_off;
-        self
     }
 
     #[inline]
@@ -258,36 +258,53 @@ impl Viewport {
         self.col
     }
 
-    pub fn to_cursor(&self) -> Option<(u16, u16)> {
-        self.cursor.clone()
+    pub fn to_cursor(&self) -> (u16, u16) {
+        self.vp_cursor
     }
 
-    pub fn cursor_move_to(&mut self, col: u16, row: u16) -> (u16, u16) {
-        match self.cursor {
-            Some((_, _)) => {
-                let (ccol, rcol) = if self.col_range().contains(&col) {
-                    (col, 0)
-                } else {
-                    (self.to_right(), col - self.to_right())
-                };
-                let (crow, rrow) = if self.row_range().contains(&row) {
-                    (row, 0)
-                } else {
-                    let crow = self.to_bottom() - self.scroll_off;
-                    (crow, row - crow)
-                };
-                self.cursor = Some((ccol, crow));
-                (rcol, rrow)
-            }
-            None => (0, 0),
-        }
+    pub fn apply_ed_cursor(&mut self, ed_cursor: (usize, usize)) {
+        let (cdiff, rdiff) = match (self.to_ed_cursor(self.ed_origin), ed_cursor) {
+            ((old_c, old_r), (new_c, new_r)) => (
+                (old_c as isize) - (new_c as isize),
+                (old_r as isize) - (new_r as isize),
+            ),
+        };
+
+        let col = ((self.col + self.vp_cursor.0) as isize) + cdiff;
+        let row = ((self.row + self.vp_cursor.1) as isize) + rdiff;
+
+        let (vp_col, ed_col): (u16, usize) = if col < (self.to_left() as isize) {
+            (self.to_left(), ed_cursor.0)
+        } else if col > (self.to_right() as isize) {
+            (self.to_right(), ed_cursor.0 - (self.width as usize) + 1)
+        } else {
+            (col.try_into().unwrap(), self.ed_origin.0)
+        };
+        let (vp_row, ed_row): (u16, usize) = if row < (self.to_top() as isize) {
+            (self.to_top(), ed_cursor.1)
+        } else if row > (self.to_bottom() as isize) {
+            (self.to_bottom(), ed_cursor.1 - (self.height as usize) + 1)
+        } else {
+            (row.try_into().unwrap(), self.ed_origin.1)
+        };
+
+        trace!(
+            "ed_cursor:{:?} ed_origin:{:?}->{:?} vp_cursor:{:?}->{:?}",
+            ed_cursor,
+            self.ed_origin,
+            (ed_col, ed_row),
+            self.vp_cursor,
+            (vp_col, vp_row)
+        );
+
+        self.ed_origin = (ed_col, ed_row);
+        self.vp_cursor = (vp_col, vp_row);
     }
 
-    pub fn cursor_move_by(&mut self, col: u16, row: u16) -> (u16, u16) {
-        match self.cursor {
-            Some((ccol, crow)) => self.cursor_move_to(ccol + col, crow + row),
-            None => (0, 0),
-        }
+    fn to_ed_cursor(&self, ed_origin: (usize, usize)) -> (usize, usize) {
+        let col = ed_origin.0 + (self.vp_cursor.0 as usize);
+        let row = ed_origin.1 + (self.vp_cursor.1 as usize);
+        (col, row)
     }
 }
 
@@ -748,8 +765,7 @@ impl EditLine {
         S: Store,
     {
         let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
-            ((col, row), Some((c, r))) => (col + c, row + r),
-            ((col, row), None) => (col, row),
+            ((col, row), (c, r)) => (col + c, row + r),
         };
         trace!(
             "Focus edit-line {:?} {:?}",
@@ -770,15 +786,18 @@ impl EditLine {
     where
         S: Store,
     {
-        match evnt {
-            Event::Key(KeyEvent {
-                code: KeyCode::Enter,
-                ..
-            }) => Ok(Some(evnt)),
-            evnt => {
-                let er = self.buffer.handle_event(evnt)?;
-                Ok(er.evnt)
-            }
+        match (to_modifiers(&evnt), to_key_code(&evnt)) {
+            (m, Some(KeyCode::Enter)) if m.is_empty() => Ok(Some(evnt)),
+            _ => match self.buffer.handle_event(evnt)? {
+                EditRes {
+                    col_at,
+                    row_at,
+                    evnt,
+                } => {
+                    self.vp.apply_ed_cursor((col_at, row_at));
+                    Ok(evnt)
+                }
+            },
         }
     }
 }
@@ -866,8 +885,7 @@ impl EditBox {
     {
         trace!("Focus edit-box");
         let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
-            ((col, row), Some((c, r))) => (col + c, row + r),
-            ((col, row), None) => (col, row),
+            ((col, row), (c, r)) => (col + c, row + r),
         };
         app.show_cursor_at(col, row)
     }

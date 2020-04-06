@@ -32,23 +32,26 @@ impl From<Event> for InsertEvent {
     fn from(evnt: Event) -> InsertEvent {
         match evnt {
             Event::Key(KeyEvent { code, modifiers }) => match code {
-                KeyCode::Backspace => InsertEvent::Backspace,
-                KeyCode::Enter => InsertEvent::Enter,
-                KeyCode::Left => InsertEvent::Left,
-                KeyCode::Right => InsertEvent::Right,
-                KeyCode::Up => InsertEvent::Up,
-                KeyCode::Down => InsertEvent::Down,
-                KeyCode::Home => InsertEvent::Home,
-                KeyCode::End => InsertEvent::End,
-                KeyCode::PageUp => InsertEvent::PageUp,
-                KeyCode::PageDown => InsertEvent::PageDown,
-                KeyCode::Tab => InsertEvent::Tab,
-                KeyCode::BackTab => InsertEvent::BackTab,
-                KeyCode::Delete => InsertEvent::Delete,
-                KeyCode::F(f) => InsertEvent::F(f, modifiers),
-                KeyCode::Char(ch) => InsertEvent::Char(ch, modifiers),
+                KeyCode::Backspace if to_modifier(&evnt).is_empty() => InsertEvent::Backspace,
+                KeyCode::Enter if to_modifier(&evnt).is_empty() => InsertEvent::Enter,
+                KeyCode::Left if to_modifier(&evnt).is_empty() => InsertEvent::Left,
+                KeyCode::Right if to_modifier(&evnt).is_empty() => InsertEvent::Right,
+                KeyCode::Up if to_modifier(&evnt).is_empty() => InsertEvent::Up,
+                KeyCode::Down if to_modifier(&evnt).is_empty() => InsertEvent::Down,
+                KeyCode::Home if to_modifier(&evnt).is_empty() => InsertEvent::Home,
+                KeyCode::End if to_modifier(&evnt).is_empty() => InsertEvent::End,
+                KeyCode::PageUp if to_modifier(&evnt).is_empty() => InsertEvent::PageUp,
+                KeyCode::PageDown if to_modifier(&evnt).is_empty() => InsertEvent::PageDown,
+                KeyCode::Tab if to_modifier(&evnt).is_empty() => InsertEvent::Tab,
+                KeyCode::BackTab if to_modifier(&evnt).is_empty() => InsertEvent::BackTab,
+                KeyCode::Delete if to_modifier(&evnt).is_empty() => InsertEvent::Delete,
+                KeyCode::F(f) if to_modifier(&evnt).is_empty() => InsertEvent::F(f, modifiers),
+                KeyCode::Char(ch) if to_modifier(&evnt).is_empty() => {
+                    InsertEvent::Char(ch, modifiers)
+                }
+                KeyCode::Esc if to_modifier(&evnt).is_empty() => InsertEvent::Esc,
                 KeyCode::Insert | KeyCode::Null => InsertEvent::Noop,
-                KeyCode::Esc => InsertEvent::Esc,
+                _ => InsertEvent::Noop,
             },
             Event::Mouse(_) => InsertEvent::Noop,
             Event::Resize(_, _) => InsertEvent::Noop,
@@ -59,10 +62,268 @@ impl From<Event> for InsertEvent {
 impl InsertEvent {
     fn to_modifier(evnt: &InsertEvent) -> KeyModifiers {
         match evnt {
-            InsertEvent::F(f, modifiers) => modifiers.clone(),
-            InsertEvent::Char(ch, modifiers) => modifiers.clone(),
+            InsertEvent::F(_, modifiers) => modifiers.clone(),
+            InsertEvent::Char(_, modifiers) => modifiers.clone(),
             _ => KeyModifiers::empty(),
         }
+    }
+}
+
+impl InsertEvent {
+    fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+        use InsertEvent::{BackTab, Backspace, Char, Delete, Down, End, Enter};
+        use InsertEvent::{Esc, Home, Insert, Left, Noop, PageDown, PageUp};
+        use InsertEvent::{Right, Tab, Up, F};
+
+        let res = match self {
+            Backspace if *cursor == 0 => EditRes::new(None, 0, Some(evnt)),
+            Backspace => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                if start_idx == 0 && start_idx == *cursor {
+                    EditRes::new(None, 0, None) // consume as noop
+                } else if start_idx == 0 {
+                    let new_cursor = cursor.saturating_sub(1);
+                    buf.remove(new_cursor..*cursor);
+                    *cursor = new_cursor;
+                    EditRes::new(Some(*cursor - start_idx), 0, None)
+                } else if start_idx == *cursor {
+                    let first_idx = line_first_char(buf, start_idx - 1);
+                    let last_idx = line_last_char(buf, start_idx - 1);
+                    buf.remove((last_idx + 1)..*cursor);
+                    *cursor = last_idx + 1;
+                    EditRes::new(Some(last_idx - first_idx), -1, None)
+                } else {
+                    let first_idx = line_first_char(buf, *cursor);
+                    let new_cursor = cursor.saturating_sub(1);
+                    buf.remove(new_cursor..*cursor);
+                    *cursor = new_cursor;
+                    EditRes::new(Some(first_idx - *cursor), 0, None)
+                }
+            }
+            Enter => {
+                buf.insert_char(*cursor, NEW_LINE_CHAR);
+                *cursor += 1;
+                EditRes::new(Some(0), 1, None)
+            }
+            Left => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                if start_idx < *cursor {
+                    *cursor -= 1;
+                }
+                EditRes::new(Some(*cursor - start_idx), 0, None)
+            }
+            Right => {
+                let last_idx = line_last_char(buf, *cursor);
+                let start_idx = line_first_char(buf, *cursor);
+                if last_idx > *cursor {
+                    *cursor += 1;
+                }
+                EditRes::new(Some(*cursor - start_idx), 0, None)
+            }
+            Up => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                let cur_col = *cursor - start_idx;
+                let mut lines = buf.lines_at(buf.char_to_line(*cursor));
+                match lines.prev() {
+                    Some(_) => {
+                        let prev_start_idx = buf.line_to_char(buf.char_to_line(*cursor) - 1);
+                        let prev_last_idx = line_last_char(buf, start_idx);
+                        let col_at = if (prev_last_idx - prev_start_idx) < cur_col {
+                            *cursor = prev_last_idx;
+                            prev_last_idx - prev_start_idx
+                        } else {
+                            *cursor = prev_start_idx + cur_col;
+                            cur_col
+                        };
+                        EditRes::new(Some(col_at), -1, None)
+                    }
+                    None => EditRes::new(None, 0, None), // consume as noop
+                }
+            }
+            Down => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                let cur_col = *cursor - start_idx;
+                let mut lines = buf.lines_at(buf.char_to_line(*cursor));
+                match lines.next() {
+                    Some(_) => {
+                        let next_start_idx = buf.line_to_char(buf.char_to_line(*cursor) + 1);
+                        let next_last_idx = line_last_char(buf, start_idx);
+                        let col_at = if (next_last_idx - next_start_idx) < cur_col {
+                            *cursor = next_last_idx;
+                            next_last_idx - next_start_idx
+                        } else {
+                            *cursor = next_start_idx + cur_col;
+                            cur_col
+                        };
+                        EditRes::new(Some(col_at), 1, None)
+                    }
+                    None => EditRes::new(None, 0, None), // consume as noop
+                }
+            }
+            Home => {
+                *cursor = line_first_char(buf, *cursor);
+                EditRes::new(Some(0), 0, None)
+            }
+            End => {
+                let first_idx = line_first_char(buf, *cursor);
+                *cursor = line_last_char(buf, *cursor);
+                EditRes::new(Some(*cursor - first_idx), 0, None)
+            }
+            Tab => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                let cur_col = *cursor - start_idx;
+
+                buf.insert_char(*cursor, '\t');
+                *cursor += 1;
+                EditRes::new(Some(cur_col + 1), 1, None)
+            }
+            Delete => {
+                buf.remove(*cursor..(*cursor + 1));
+                EditRes::new(None, 0, None)
+            }
+            Char(ch, _) => {
+                let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
+                let cur_col = *cursor - start_idx;
+                buf.insert_char(*cursor, *ch);
+                *cursor += 1;
+                EditRes::new(Some(cur_col + 1), 0, None)
+            }
+            F(_, _) | BackTab | Insert | PageUp | PageDown | Noop | Esc => {
+                EditRes::new(None, 0, Some(evnt))
+            }
+        };
+
+        Ok(res)
+    }
+}
+
+enum NormalEvent {
+    Noop,
+    Esc,
+    Backspace,
+    Enter,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Tab,
+    BackTab,
+    Delete,
+    Insert,
+    F(u8, KeyModifiers),
+    Char(char, KeyModifiers),
+}
+
+impl From<Event> for NormalEvent {
+    fn from(evnt: Event) -> NormalEvent {
+        match evnt {
+            Event::Key(KeyEvent { code, modifiers }) => match code {
+                KeyCode::Backspace => NormalEvent::Backspace,
+                KeyCode::Enter => NormalEvent::Enter,
+                KeyCode::Left => NormalEvent::Left,
+                KeyCode::Right => NormalEvent::Right,
+                KeyCode::Up => NormalEvent::Up,
+                KeyCode::Down => NormalEvent::Down,
+                KeyCode::Home => NormalEvent::Home,
+                KeyCode::End => NormalEvent::End,
+                KeyCode::PageUp => NormalEvent::PageUp,
+                KeyCode::PageDown => NormalEvent::PageDown,
+                KeyCode::Tab => NormalEvent::Tab,
+                KeyCode::BackTab => NormalEvent::BackTab,
+                KeyCode::Delete => NormalEvent::Delete,
+                KeyCode::F(f) => NormalEvent::F(f, modifiers),
+                KeyCode::Char(ch) => NormalEvent::Char(ch, modifiers),
+                KeyCode::Insert | KeyCode::Null => NormalEvent::Noop,
+                KeyCode::Esc => NormalEvent::Esc,
+            },
+            Event::Mouse(_) => NormalEvent::Noop,
+            Event::Resize(_, _) => NormalEvent::Noop,
+        }
+    }
+}
+
+impl NormalEvent {
+    fn to_modifier(evnt: &NormalEvent) -> KeyModifiers {
+        match evnt {
+            NormalEvent::F(_, modifiers) => modifiers.clone(),
+            NormalEvent::Char(_, modifiers) => modifiers.clone(),
+            _ => KeyModifiers::empty(),
+        }
+    }
+}
+
+impl NormalEvent {
+    fn handle_event(&self, _buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+        Ok(EditRes::new(None, 0, Some(evnt)))
+    }
+}
+
+enum ReplaceEvent {
+    Noop,
+    Esc,
+    Backspace,
+    Enter,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Tab,
+    BackTab,
+    Delete,
+    Insert,
+    F(u8, KeyModifiers),
+    Char(char, KeyModifiers),
+}
+
+impl From<Event> for ReplaceEvent {
+    fn from(evnt: Event) -> ReplaceEvent {
+        match evnt {
+            Event::Key(KeyEvent { code, modifiers }) => match code {
+                KeyCode::Backspace => ReplaceEvent::Backspace,
+                KeyCode::Enter => ReplaceEvent::Enter,
+                KeyCode::Left => ReplaceEvent::Left,
+                KeyCode::Right => ReplaceEvent::Right,
+                KeyCode::Up => ReplaceEvent::Up,
+                KeyCode::Down => ReplaceEvent::Down,
+                KeyCode::Home => ReplaceEvent::Home,
+                KeyCode::End => ReplaceEvent::End,
+                KeyCode::PageUp => ReplaceEvent::PageUp,
+                KeyCode::PageDown => ReplaceEvent::PageDown,
+                KeyCode::Tab => ReplaceEvent::Tab,
+                KeyCode::BackTab => ReplaceEvent::BackTab,
+                KeyCode::Delete => ReplaceEvent::Delete,
+                KeyCode::F(f) => ReplaceEvent::F(f, modifiers),
+                KeyCode::Char(ch) => ReplaceEvent::Char(ch, modifiers),
+                KeyCode::Insert | KeyCode::Null => ReplaceEvent::Noop,
+                KeyCode::Esc => ReplaceEvent::Esc,
+            },
+            Event::Mouse(_) => ReplaceEvent::Noop,
+            Event::Resize(_, _) => ReplaceEvent::Noop,
+        }
+    }
+}
+
+impl ReplaceEvent {
+    fn to_modifier(evnt: &ReplaceEvent) -> KeyModifiers {
+        match evnt {
+            ReplaceEvent::F(_, modifiers) => modifiers.clone(),
+            ReplaceEvent::Char(_, modifiers) => modifiers.clone(),
+            _ => KeyModifiers::empty(),
+        }
+    }
+}
+
+impl ReplaceEvent {
+    fn handle_event(&self, _buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
+        Ok(EditRes::new(None, 0, Some(evnt)))
     }
 }
 
@@ -168,258 +429,21 @@ impl Buffer {
 }
 
 impl Buffer {
-    fn do_key_backspace(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if *cursor == 0 || !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            if start_idx == 0 && start_idx == *cursor {
-                Ok(EditRes::new(None, 0, None)) // consume as noop
-            } else if start_idx == 0 {
-                let new_cursor = cursor.saturating_sub(1);
-                buf.remove(new_cursor..*cursor);
-                *cursor = new_cursor;
-                Ok(EditRes::new(Some(*cursor - start_idx), 0, None))
-            } else if start_idx == *cursor {
-                let first_idx = line_first_char(buf, start_idx - 1);
-                let last_idx = line_last_char(buf, start_idx - 1);
-                buf.remove((last_idx + 1)..*cursor);
-                *cursor = last_idx + 1;
-                Ok(EditRes::new(Some(last_idx - first_idx), -1, None))
-            } else {
-                let first_idx = line_first_char(buf, *cursor);
-                let new_cursor = cursor.saturating_sub(1);
-                buf.remove(new_cursor..*cursor);
-                *cursor = new_cursor;
-                Ok(EditRes::new(Some(first_idx - *cursor), 0, None))
-            }
-        }
-    }
-
-    fn do_key_enter(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            buf.insert_char(*cursor, NEW_LINE_CHAR);
-            *cursor += 1;
-            Ok(EditRes::new(Some(0), 1, None))
-        }
-    }
-
-    fn do_key_left(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            if start_idx < *cursor {
-                *cursor -= 1;
-            }
-            Ok(EditRes::new(Some(*cursor - start_idx), 0, None))
-        }
-    }
-
-    fn do_key_right(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            let last_idx = line_last_char(buf, *cursor);
-            let start_idx = line_first_char(buf, *cursor);
-            if last_idx > *cursor {
-                *cursor += 1;
-            }
-            Ok(EditRes::new(Some(*cursor - start_idx), 0, None))
-        }
-    }
-
-    fn do_key_up(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt)))
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            let cur_col = *cursor - start_idx;
-            let mut lines = buf.lines_at(buf.char_to_line(*cursor));
-            match lines.prev() {
-                Some(_) => {
-                    let prev_start_idx = buf.line_to_char(buf.char_to_line(*cursor) - 1);
-                    let prev_last_idx = line_last_char(buf, start_idx);
-                    let col_at = if (prev_last_idx - prev_start_idx) < cur_col {
-                        *cursor = prev_last_idx;
-                        prev_last_idx - prev_start_idx
-                    } else {
-                        *cursor = prev_start_idx + cur_col;
-                        cur_col
-                    };
-                    Ok(EditRes::new(Some(col_at), -1, None))
-                }
-                None => Ok(EditRes::new(None, 0, None)), // consume as noop
-            }
-        }
-    }
-
-    fn do_key_down(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt)))
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            let cur_col = *cursor - start_idx;
-            let mut lines = buf.lines_at(buf.char_to_line(*cursor));
-            match lines.next() {
-                Some(_) => {
-                    let next_start_idx = buf.line_to_char(buf.char_to_line(*cursor) + 1);
-                    let next_last_idx = line_last_char(buf, start_idx);
-                    let col_at = if (next_last_idx - next_start_idx) < cur_col {
-                        *cursor = next_last_idx;
-                        next_last_idx - next_start_idx
-                    } else {
-                        *cursor = next_start_idx + cur_col;
-                        cur_col
-                    };
-                    Ok(EditRes::new(Some(col_at), 1, None))
-                }
-                None => Ok(EditRes::new(None, 0, None)), // consume as noop
-            }
-        }
-    }
-
-    fn do_key_home(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt)))
-        } else {
-            *cursor = line_first_char(buf, *cursor);
-            Ok(EditRes::new(Some(0), 0, None))
-        }
-    }
-
-    fn do_key_end(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt)))
-        } else {
-            let first_idx = line_first_char(buf, *cursor);
-            *cursor = line_last_char(buf, *cursor);
-            Ok(EditRes::new(Some(*cursor - first_idx), 0, None))
-        }
-    }
-
-    fn do_key_pageup(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_pagedown(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_tab(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt)))
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            let cur_col = *cursor - start_idx;
-
-            buf.insert_char(*cursor, '\t');
-            *cursor += 1;
-            Ok(EditRes::new(Some(cur_col + 1), 1, None))
-        }
-    }
-
-    fn do_key_backtab(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_delete(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            buf.remove(*cursor..(*cursor + 1));
-            Ok(EditRes::new(None, 0, None))
-        }
-    }
-
-    fn do_key_insert(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_fkey(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_char(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        if !to_modifier(&evnt).is_empty() {
-            Ok(EditRes::new(None, 0, Some(evnt))) // noop
-        } else {
-            let start_idx = buf.line_to_char(buf.char_to_line(*cursor));
-            let cur_col = *cursor - start_idx;
-            match evnt {
-                Event::Key(KeyEvent {
-                    code: KeyCode::Char(ch),
-                    ..
-                }) => {
-                    buf.insert_char(*cursor, '\t');
-                    *cursor += 1;
-                    Ok(EditRes::new(Some(cur_col + 1), 0, None))
-                }
-                _ => err_at!(Fatal, msg: format!("unreachable")),
-            }
-        }
-    }
-
-    fn do_key_null(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-
-    fn do_key_esc(_buf: &mut Rope, _cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        Ok(EditRes::new(None, 0, Some(evnt)))
-    }
-}
-
-impl Buffer {
     pub fn handle_event(&mut self, evnt: Event) -> Result<EditRes> {
         match self {
-            Buffer::Normal { buf, cursor } => Self::handle_for_insert(buf, cursor, evnt),
-            Buffer::Insert { buf, cursor } => Self::handle_for_normal(buf, cursor, evnt),
-            Buffer::Replace { buf, cursor } => Self::handle_for_replace(buf, cursor, evnt),
+            Buffer::Normal { buf, cursor } => {
+                let ne: NormalEvent = evnt.clone().into();
+                ne.handle_event(buf, cursor, evnt)
+            }
+            Buffer::Insert { buf, cursor } => {
+                let ie: InsertEvent = evnt.clone().into();
+                ie.handle_event(buf, cursor, evnt)
+            }
+            Buffer::Replace { buf, cursor } => {
+                let re: ReplaceEvent = evnt.clone().into();
+                re.handle_event(buf, cursor, evnt)
+            }
         }
-    }
-
-    pub fn handle_for_insert(buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
-        match &evnt {
-            Event::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Backspace => Self::do_key_backspace(buf, cursor, evnt),
-                KeyCode::Enter => Self::do_key_enter(buf, cursor, evnt),
-                KeyCode::Left => Self::do_key_left(buf, cursor, evnt),
-                KeyCode::Right => Self::do_key_right(buf, cursor, evnt),
-                KeyCode::Up => Self::do_key_up(buf, cursor, evnt),
-                KeyCode::Down => Self::do_key_down(buf, cursor, evnt),
-                KeyCode::Home => Self::do_key_home(buf, cursor, evnt),
-                KeyCode::End => Self::do_key_end(buf, cursor, evnt),
-                KeyCode::PageUp => Self::do_key_pageup(buf, cursor, evnt),
-                KeyCode::PageDown => Self::do_key_pagedown(buf, cursor, evnt),
-                KeyCode::Tab => Self::do_key_tab(buf, cursor, evnt),
-                KeyCode::BackTab => Self::do_key_backtab(buf, cursor, evnt),
-                KeyCode::Delete => Self::do_key_delete(buf, cursor, evnt),
-                KeyCode::Insert => Self::do_key_insert(buf, cursor, evnt),
-                KeyCode::F(_) => Self::do_key_fkey(buf, cursor, evnt),
-                KeyCode::Char(_) => Self::do_key_char(buf, cursor, evnt),
-                KeyCode::Null => Self::do_key_null(buf, cursor, evnt),
-                KeyCode::Esc => Self::do_key_esc(buf, cursor, evnt),
-            },
-            _ => Ok(EditRes::new(None, 0, Some(evnt))),
-        }
-    }
-
-    pub fn handle_for_normal(
-        _buf: &mut Rope,
-        _cursor: &mut usize,
-        _evnt: Event,
-    ) -> Result<EditRes> {
-        todo!()
-    }
-
-    pub fn handle_for_replace(
-        _buf: &mut Rope,
-        _cursor: &mut usize,
-        _evnt: Event,
-    ) -> Result<EditRes> {
-        todo!()
     }
 }
 

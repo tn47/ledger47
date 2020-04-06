@@ -7,6 +7,37 @@ use ledger::core::{Error, Result};
 
 const NEW_LINE_CHAR: char = '\n';
 
+macro_rules! update_cursor {
+    ($buf:expr, $cursor:expr, $new_cursor:expr, $evnt:expr) => {{
+        let (col_at, row_at) = {
+            let row_at = $buf.char_to_line($new_cursor);
+            let col_at = $new_cursor - $buf.line_to_char(row_at);
+            (col_at, row_at)
+        };
+
+        $cursor = $new_cursor;
+        EditRes::new(col_at, row_at, $evnt)
+    }};
+}
+
+macro_rules! common_impl_event {
+    ($evty:ident) => {
+        impl $evty {
+            fn to_modifiers(evnt: &$evty) -> KeyModifiers {
+                match evnt {
+                    $evty::F(_, modifiers) => modifiers.clone(),
+                    $evty::Char(_, modifiers) => modifiers.clone(),
+                    _ => KeyModifiers::empty(),
+                }
+            }
+        }
+    };
+}
+
+common_impl_event!(InsertEvent);
+common_impl_event!(NormalEvent);
+common_impl_event!(ReplaceEvent);
+
 enum InsertEvent {
     Noop,
     Esc,
@@ -60,35 +91,16 @@ impl From<Event> for InsertEvent {
 }
 
 impl InsertEvent {
-    fn to_modifiers(evnt: &InsertEvent) -> KeyModifiers {
-        match evnt {
-            InsertEvent::F(_, modifiers) => modifiers.clone(),
-            InsertEvent::Char(_, modifiers) => modifiers.clone(),
-            _ => KeyModifiers::empty(),
-        }
-    }
-}
-
-macro_rules! update_cursor {
-    ($buf:expr, $cursor:expr, $new_cursor:expr, $evnt:expr) => {{
-        let (col_at, row_at) = {
-            let row_at = $buf.char_to_line($new_cursor);
-            let col_at = $new_cursor - $buf.line_to_char(row_at);
-            (col_at, row_at)
-        };
-
-        $cursor = $new_cursor;
-        EditRes::new(col_at, row_at, $evnt)
-    }};
-}
-
-impl InsertEvent {
     fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
         use InsertEvent::{BackTab, Backspace, Char, Delete, Down, End, Enter};
         use InsertEvent::{Esc, Home, Insert, Left, Noop, PageDown, PageUp};
         use InsertEvent::{Right, Tab, Up, F};
 
         let res = match self {
+            Char(ch, _) => {
+                buf.insert_char(*cursor, *ch);
+                update_cursor!(buf, *cursor, *cursor + 1, None)
+            }
             Backspace if *cursor == 0 => EditRes::new(0, 0, Some(evnt)),
             Backspace => {
                 let new_cursor = *cursor - 1;
@@ -161,10 +173,6 @@ impl InsertEvent {
                 buf.remove(*cursor..(*cursor + 1));
                 update_cursor!(buf, *cursor, *cursor, None)
             }
-            Char(ch, _) => {
-                buf.insert_char(*cursor, '\t');
-                update_cursor!(buf, *cursor, *cursor + 1, None)
-            }
             F(_, _) | BackTab | Insert | PageUp | PageDown | Noop | Esc => {
                 update_cursor!(buf, *cursor, *cursor, Some(evnt))
             }
@@ -224,16 +232,6 @@ impl From<Event> for NormalEvent {
 }
 
 impl NormalEvent {
-    fn to_modifiers(evnt: &NormalEvent) -> KeyModifiers {
-        match evnt {
-            NormalEvent::F(_, modifiers) => modifiers.clone(),
-            NormalEvent::Char(_, modifiers) => modifiers.clone(),
-            _ => KeyModifiers::empty(),
-        }
-    }
-}
-
-impl NormalEvent {
     fn handle_event(&self, buf: &mut Rope, cursor: &mut usize, evnt: Event) -> Result<EditRes> {
         Ok(update_cursor!(buf, *cursor, *cursor, Some(evnt)))
     }
@@ -284,16 +282,6 @@ impl From<Event> for ReplaceEvent {
             },
             Event::Mouse(_) => ReplaceEvent::Noop,
             Event::Resize(_, _) => ReplaceEvent::Noop,
-        }
-    }
-}
-
-impl ReplaceEvent {
-    fn to_modifiers(evnt: &ReplaceEvent) -> KeyModifiers {
-        match evnt {
-            ReplaceEvent::F(_, modifiers) => modifiers.clone(),
-            ReplaceEvent::Char(_, modifiers) => modifiers.clone(),
-            _ => KeyModifiers::empty(),
         }
     }
 }
@@ -390,18 +378,15 @@ impl Buffer {
         .to_string()
     }
 
-    pub fn to_lines(&self) -> Vec<String> {
-        match self {
-            Buffer::Normal { buf, .. } => {
-                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
-            }
-            Buffer::Insert { buf, .. } => {
-                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
-            }
-            Buffer::Replace { buf, .. } => {
-                buf.lines().map(|l| l.to_string()).collect::<Vec<String>>()
-            }
-        }
+    pub fn to_lines(&self, from: usize, till: usize) -> Vec<String> {
+        let buf = match self {
+            Buffer::Normal { buf, .. } => buf,
+            Buffer::Insert { buf, .. } => buf,
+            Buffer::Replace { buf, .. } => buf,
+        };
+        (from..till)
+            .map(|line_idx| buf.line(line_idx).to_string())
+            .collect()
     }
 }
 

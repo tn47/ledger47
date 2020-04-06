@@ -33,7 +33,7 @@ pub const FG_PERIOD: Color = Color::AnsiValue(27);
 pub const FG_DATE: Color = Color::AnsiValue(33);
 pub const FG_TITLE: Color = Color::AnsiValue(6);
 pub const FG_BORDER: Color = Color::AnsiValue(15);
-pub const FG_EDIT_INLINE: Color = Color::AnsiValue(240);
+pub const FG_EDIT_INLINE: Color = Color::AnsiValue(59);
 pub const FG_EDIT: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
 pub const FG_STATUS: Color = Color::AnsiValue(15);
@@ -156,8 +156,8 @@ pub struct Viewport {
     row: u16,
     height: u16,
     width: u16,
-    ed_origin: (usize, usize), // absolute (col, row) within buffer
-    vp_cursor: (u16, u16),     // (col-offset, row-offset)
+    ed_origin: (usize, usize), // absolute (col, row) within buffer, (0,0)
+    vp_cursor_off: (u16, u16), // (col-offset, row-offset)
 }
 
 impl fmt::Display for Viewport {
@@ -179,7 +179,7 @@ impl Viewport {
             height,
             width,
             ed_origin: Default::default(),
-            vp_cursor: Default::default(),
+            vp_cursor_off: Default::default(),
         }
     }
 
@@ -234,6 +234,11 @@ impl Viewport {
     }
 
     #[inline]
+    pub fn to_ed_origin(&self) -> (usize, usize) {
+        self.ed_origin
+    }
+
+    #[inline]
     pub fn to_size(&self) -> (u16, u16) {
         (self.height, self.width)
     }
@@ -258,34 +263,37 @@ impl Viewport {
         self.col
     }
 
-    pub fn to_cursor(&self) -> (u16, u16) {
-        self.vp_cursor
+    pub fn to_cursor_off(&self) -> (u16, u16) {
+        self.vp_cursor_off
     }
 
     pub fn apply_ed_cursor(&mut self, ed_cursor: (usize, usize)) {
         let (cdiff, rdiff) = match (self.to_ed_cursor(self.ed_origin), ed_cursor) {
             ((old_c, old_r), (new_c, new_r)) => (
-                (old_c as isize) - (new_c as isize),
-                (old_r as isize) - (new_r as isize),
+                (new_c as isize) - (old_c as isize),
+                (new_r as isize) - (old_r as isize),
             ),
         };
 
-        let col = ((self.col + self.vp_cursor.0) as isize) + cdiff;
-        let row = ((self.row + self.vp_cursor.1) as isize) + rdiff;
+        let ccol = ((self.col + self.vp_cursor_off.0) as isize) + cdiff;
+        let crow = ((self.row + self.vp_cursor_off.1) as isize) + rdiff;
 
-        let (vp_col, ed_col): (u16, usize) = if col < (self.to_left() as isize) {
-            (self.to_left(), ed_cursor.0)
-        } else if col > (self.to_right() as isize) {
-            (self.to_right(), ed_cursor.0 - (self.width as usize) + 1)
+        let (vp_col, ed_col): (u16, usize) = if ccol < (self.to_left() as isize) {
+            (0, ed_cursor.0)
+        } else if ccol > (self.to_right() as isize) {
+            (self.width - 1, ed_cursor.0 - (self.width as usize) + 1)
         } else {
-            (col.try_into().unwrap(), self.ed_origin.0)
+            let new_col: u16 = ccol.try_into().unwrap();
+            trace!("{} {} {}", ccol, new_col, self.col);
+            (new_col - self.col, self.ed_origin.0)
         };
-        let (vp_row, ed_row): (u16, usize) = if row < (self.to_top() as isize) {
-            (self.to_top(), ed_cursor.1)
-        } else if row > (self.to_bottom() as isize) {
-            (self.to_bottom(), ed_cursor.1 - (self.height as usize) + 1)
+        let (vp_row, ed_row): (u16, usize) = if crow < (self.to_top() as isize) {
+            (0, ed_cursor.1)
+        } else if crow > (self.to_bottom() as isize) {
+            (self.height - 1, ed_cursor.1 - (self.height as usize) + 1)
         } else {
-            (row.try_into().unwrap(), self.ed_origin.1)
+            let new_row: u16 = crow.try_into().unwrap();
+            (new_row - self.row, self.ed_origin.1)
         };
 
         trace!(
@@ -293,17 +301,17 @@ impl Viewport {
             ed_cursor,
             self.ed_origin,
             (ed_col, ed_row),
-            self.vp_cursor,
+            self.vp_cursor_off,
             (vp_col, vp_row)
         );
 
         self.ed_origin = (ed_col, ed_row);
-        self.vp_cursor = (vp_col, vp_row);
+        self.vp_cursor_off = (vp_col, vp_row);
     }
 
     fn to_ed_cursor(&self, ed_origin: (usize, usize)) -> (usize, usize) {
-        let col = ed_origin.0 + (self.vp_cursor.0 as usize);
-        let row = ed_origin.1 + (self.vp_cursor.1 as usize);
+        let col = ed_origin.0 + (self.vp_cursor_off.0 as usize);
+        let row = ed_origin.1 + (self.vp_cursor_off.1 as usize);
         (col, row)
     }
 }
@@ -764,13 +772,13 @@ impl EditLine {
     where
         S: Store,
     {
-        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
+        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor_off()) {
             ((col, row), (c, r)) => (col + c, row + r),
         };
         trace!(
             "Focus edit-line {:?} {:?}",
             self.vp.to_origin(),
-            self.vp.to_cursor()
+            self.vp.to_cursor_off()
         );
         app.show_cursor_at(col, row)
     }
@@ -787,7 +795,13 @@ impl EditLine {
         S: Store,
     {
         match (to_modifiers(&evnt), to_key_code(&evnt)) {
-            (m, Some(KeyCode::Enter)) if m.is_empty() => Ok(Some(evnt)),
+            (m, Some(KeyCode::Enter))
+            | (m, Some(KeyCode::Up))
+            | (m, Some(KeyCode::Down))
+            | (m, Some(KeyCode::PageUp))
+            | (m, Some(KeyCode::PageDown))
+            | (m, Some(KeyCode::Tab)) => Ok(Some(evnt)),
+            (m, Some(KeyCode::BackTab)) if m.is_empty() => Ok(Some(evnt)),
             _ => match self.buffer.handle_event(evnt)? {
                 EditRes {
                     col_at,
@@ -829,6 +843,24 @@ impl fmt::Display for EditLine {
             ) as usize;
             String::from_iter(self.inline.chars().take(n_inline))
         };
+        let buf_line = {
+            let (ed_col, ed_row) = self.vp.to_ed_origin();
+            let mut lines = self
+                .buffer
+                .to_lines(0, 1)
+                .into_iter()
+                .map(|s| {
+                    s.chars()
+                        .skip(ed_col)
+                        .take(width as usize)
+                        .collect::<Vec<char>>()
+                })
+                .collect::<Vec<Vec<char>>>();
+            String::from_iter(match lines.len() {
+                0 => vec![].into_iter(),
+                n => lines.remove(0).into_iter(),
+            })
+        };
 
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
         write!(f, "{}", style::style(view_line).on(BG_EDIT).with(BG_EDIT))?;
@@ -839,13 +871,7 @@ impl fmt::Display for EditLine {
             style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
         write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(self.buffer.to_string())
-                .on(BG_EDIT)
-                .with(FG_EDIT)
-        )
+        write!(f, "{}", style::style(buf_line).on(BG_EDIT).with(FG_EDIT))
     }
 }
 
@@ -884,7 +910,7 @@ impl EditBox {
         S: Store,
     {
         trace!("Focus edit-box");
-        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor()) {
+        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor_off()) {
             ((col, row), (c, r)) => (col + c, row + r),
         };
         app.show_cursor_at(col, row)
@@ -957,7 +983,8 @@ impl fmt::Display for EditBox {
             "{}",
             style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
-        for (i, line) in self.buffer.to_lines().into_iter().enumerate() {
+        let (from, till) = self.vp.to_ed_origin();
+        for (i, line) in self.buffer.to_lines(from, till + 1).into_iter().enumerate() {
             write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
             write!(
                 f,

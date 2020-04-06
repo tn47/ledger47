@@ -91,7 +91,7 @@ where
         };
         let ws_input_name = {
             let inline = "Enter workspace name, only alphanumeric and '_'";
-            let input_vp = vp.clone().move_by(5, 3).resize_to(1, 70);
+            let input_vp = vp.clone().move_by(5, 3).resize_to(1, 40);
             te::EditLine::new(input_vp, inline).ok().unwrap()
         };
         let comm_head = {

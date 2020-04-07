@@ -1,6 +1,6 @@
 use chrono;
 use crossterm::{
-    cursor::{self, RestorePosition, SavePosition},
+    cursor,
     event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute, queue,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
@@ -166,7 +166,7 @@ where
         }
 
         loop {
-            self.show_cursor();
+            self.show_cursor()?;
             let evnt = err_at!(Fatal, ct_event::read())?;
 
             trace!("Event-{:?}", evnt);

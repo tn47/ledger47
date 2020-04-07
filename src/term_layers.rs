@@ -147,6 +147,45 @@ where
     }
 
     pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
+        self.focus_element(app)?;
+        self.in_focus = true;
+        Ok(())
+    }
+
+    pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
+        let off = self.focus.first().unwrap().clone();
+        self.elements[off].leave(app)?;
+
+        self.in_focus = Default::default();
+        self.refresh = Default::default();
+        Ok(())
+    }
+
+    pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
+        let off = self.focus.first().unwrap().clone();
+        self.elements[off].handle_event(app, evnt)?;
+
+        match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+            (modifiers, Some(code)) if modifiers.is_empty() => match code {
+                KeyCode::Enter | KeyCode::Tab => {
+                    let off = self.focus.remove(0);
+                    self.focus.push(off);
+                    self.focus_element(app)?;
+                    Ok(None)
+                }
+                KeyCode::BackTab => {
+                    let off = self.focus.pop().unwrap();
+                    self.focus.insert(0, off);
+                    self.focus_element(app)?;
+                    Ok(None)
+                }
+                _ => Ok(Some(evnt)),
+            },
+            _ => Ok(Some(evnt)),
+        }
+    }
+
+    fn focus_element(&mut self, app: &mut Application<S>) -> Result<()> {
         let off = self.focus.first().unwrap().clone();
         match &mut self.elements[off] {
             te::Element::EditLine(e) => e.clear_inline()?,
@@ -158,36 +197,7 @@ where
 
         self.elements[off].focus(app)?;
 
-        self.in_focus = true;
         Ok(())
-    }
-
-    pub fn leave(&mut self, _app: &mut Application<S>) -> Result<()> {
-        self.in_focus = Default::default();
-        self.refresh = Default::default();
-        Ok(())
-    }
-
-    pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
-        let off = self.focus.first().unwrap().clone();
-        self.elements[off].handle_event(app, evnt);
-
-        match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
-            (modifiers, Some(code)) if modifiers.is_empty() => match code {
-                KeyCode::Enter | KeyCode::Tab => {
-                    let off = self.focus.remove(0);
-                    self.focus.push(off);
-                    Ok(None)
-                }
-                KeyCode::BackTab => {
-                    let off = self.focus.pop().unwrap();
-                    self.focus.insert(0, off);
-                    Ok(None)
-                }
-                _ => Ok(Some(evnt)),
-            },
-            _ => Ok(Some(evnt)),
-        }
     }
 }
 

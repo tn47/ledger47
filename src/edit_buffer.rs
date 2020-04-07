@@ -1,4 +1,5 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use log::trace;
 use ropey::Rope;
 
 use std::{cmp, io};
@@ -96,6 +97,9 @@ impl InsertEvent {
         use InsertEvent::{Esc, Home, Insert, Left, Noop, PageDown, PageUp};
         use InsertEvent::{Right, Tab, Up, F};
 
+        let line_idx = buf.char_to_line(*cursor);
+        let start_idx = buf.line_to_char(line_idx);
+
         let res = match self {
             Char(ch, _) => {
                 buf.insert_char(*cursor, *ch);
@@ -111,28 +115,30 @@ impl InsertEvent {
                 buf.insert_char(*cursor, NEW_LINE_CHAR);
                 update_cursor!(buf, *cursor, *cursor + 1, None)
             }
+            Left if start_idx == *cursor => update_cursor!(buf, *cursor, *cursor, None),
             Left => update_cursor!(buf, *cursor, *cursor - 1, None),
-            Right => update_cursor!(buf, *cursor, *cursor + 1, None),
-            Up if *cursor == 0 => EditRes::new(0, 0, Some(evnt)),
+            Right => {
+                if line_last_char(buf, *cursor) == *cursor {
+                    update_cursor!(buf, *cursor, *cursor, None)
+                } else {
+                    update_cursor!(buf, *cursor, *cursor + 1, None)
+                }
+            }
+            Up if *cursor == 0 => update_cursor!(buf, *cursor, *cursor, Some(evnt)),
             Up => {
-                let line_idx = buf.char_to_line(*cursor);
                 let mut lines = buf.lines_at(line_idx);
                 let (prev_line, cur_line) = (lines.prev(), lines.next());
                 match (prev_line, cur_line) {
                     (None, _) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(pline), Some(_)) => {
                         let row_at = line_idx - 1;
-                        let col_at = {
-                            let cur_col_at = *cursor - buf.line_to_char(line_idx);
-                            cmp::min(pline.len_chars(), cur_col_at)
-                        };
+                        let col_at = cmp::min(pline.len_chars(), *cursor - start_idx);
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
                     _ => err_at!(Fatal, msg: format!("unreachable"))?,
                 }
             }
             Down => {
-                let line_idx = buf.char_to_line(*cursor);
                 let mut lines = buf.lines_at(line_idx);
                 let (cur_line, next_line) = (lines.next(), lines.next());
                 match (cur_line, next_line) {
@@ -140,28 +146,14 @@ impl InsertEvent {
                     (Some(_), None) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(_), Some(nline)) => {
                         let row_at = line_idx + 1;
-                        let col_at = {
-                            let cur_col_at = *cursor - buf.line_to_char(line_idx);
-                            cmp::min(nline.len_chars(), cur_col_at)
-                        };
+                        let col_at = cmp::min(nline.len_chars(), *cursor - start_idx);
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
                 }
             }
-            Home => {
-                let new_cursor = buf.line_to_char(buf.char_to_line(*cursor));
-                update_cursor!(buf, *cursor, new_cursor, None)
-            }
+            Home => update_cursor!(buf, *cursor, start_idx, None),
             End => {
-                let (mut lines, start_idx) = {
-                    let line_idx = buf.char_to_line(*cursor);
-                    (buf.lines_at(line_idx), buf.line_to_char(line_idx))
-                };
-                let new_cursor = if let Some(line) = lines.next() {
-                    start_idx + line.len_chars()
-                } else {
-                    *cursor
-                };
+                let new_cursor = line_last_char(buf, *cursor);
                 update_cursor!(buf, *cursor, new_cursor, None)
             }
             Tab => {
@@ -169,7 +161,9 @@ impl InsertEvent {
                 update_cursor!(buf, *cursor, *cursor + 1, None)
             }
             Delete => {
-                buf.remove(*cursor..(*cursor + 1));
+                if *cursor < line_last_char(buf, *cursor) {
+                    buf.remove(*cursor..(*cursor + 1));
+                }
                 update_cursor!(buf, *cursor, *cursor, None)
             }
             F(_, _) | BackTab | Insert | PageUp | PageDown | Noop | Esc => {
@@ -409,24 +403,19 @@ impl Buffer {
 }
 
 fn line_last_char(buf: &Rope, cursor: usize) -> usize {
-    let start_idx = buf.line_to_char(buf.char_to_line(cursor));
-    let line = buf.line(buf.char_to_line(cursor));
-    let line_len = line.chars().len();
+    let line_idx = buf.char_to_line(cursor);
+    let start_idx = buf.line_to_char(line_idx);
+    let line = buf.line(line_idx);
     let chars: Vec<char> = line.chars().collect();
     let mut iter = chars.iter().rev();
     let n = match (iter.next(), iter.next()) {
-        (Some('\n'), Some('\r')) => line_len - 2 - 1,
-        (Some('\r'), Some('\n')) => line_len - 2 - 1,
-        (Some('\n'), _) => line_len - 1 - 1,
-        (Some(_), _) => line_len - 1,
-        (None, _) => line_len - 1,
+        (Some('\n'), Some('\r')) => 2,
+        (Some('\r'), Some('\n')) => 2,
+        (Some('\n'), _) => 1,
+        _ => 0,
     };
-    start_idx + n
-}
-
-#[inline]
-fn line_first_char(buf: &Rope, cursor: usize) -> usize {
-    buf.line_to_char(buf.char_to_line(cursor))
+    trace!("line_last_char {} {} {}", start_idx, chars.len(), n);
+    start_idx + chars.len() - n
 }
 
 fn to_modifiers(evnt: &Event) -> KeyModifiers {

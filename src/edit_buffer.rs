@@ -138,7 +138,7 @@ impl InsertEvent {
                 match (cur_line, next_line) {
                     (None, _) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(_), None) => update_cursor!(buf, *cursor, *cursor, None),
-                    (Some(cline), Some(nline)) => {
+                    (Some(_), Some(nline)) => {
                         let row_at = line_idx + 1;
                         let col_at = {
                             let cur_col_at = *cursor - buf.line_to_char(line_idx);

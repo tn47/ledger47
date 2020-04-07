@@ -1,7 +1,7 @@
 use chrono;
 use crossterm::{
-    cursor,
-    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
+    cursor::{self, RestorePosition, SavePosition},
+    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute, queue,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -10,6 +10,7 @@ use log::{debug, info, trace};
 use std::{
     ffi,
     io::{self, Write},
+    mem,
 };
 
 use crate::term_elements as te;
@@ -54,6 +55,7 @@ where
     status: te::StatusLine,
     // cmd: te::CmdLine,
     focus: ViewFocus,
+    cursor: (u16, u16),
 }
 
 impl<S> View<S>
@@ -74,6 +76,7 @@ where
             layers: Default::default(),
             status: Default::default(),
             focus: ViewFocus::Layer,
+            cursor: (1, 1),
         })
     }
 
@@ -152,32 +155,40 @@ where
 
     fn event_loop(mut self) -> Result<()> {
         self.view.status.log("");
-        self.refresh()?.queue()?.flush()?;
+        self.refresh()?.render()?;
+
+        match self.view.layers.pop() {
+            Some(mut layer) => {
+                layer.focus(&mut self)?;
+                self.view.layers.push(layer);
+            }
+            None => (),
+        }
 
         loop {
-            match self.view.layers.pop() {
-                Some(mut layer) => {
-                    layer.focus(&mut self)?;
-                    self.view.layers.push(layer);
-                }
-                None => (),
-            }
-
+            self.show_cursor();
             let evnt = err_at!(Fatal, ct_event::read())?;
 
             trace!("Event-{:?}", evnt);
 
-            match evnt {
-                Event::Resize { .. } => (),
-                evnt => match self.handle_event(evnt)? {
-                    Some(Event::Key(KeyEvent {
-                        code: KeyCode::Char('q'),
-                        modifiers,
-                    })) if modifiers.is_empty() => break Ok(()),
-                    _ => (),
-                },
+            let evnt = match evnt {
+                Event::Resize { .. } => None,
+                evnt => self.handle_event(evnt)?,
             };
-            self.refresh()?.queue()?.flush()?;
+
+            if let Some(evnt) = evnt {
+                match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+                    (m, Some(KeyCode::Char('q'))) if m.is_empty() => break Ok(()),
+                    (m, Some(KeyCode::Esc)) if m.is_empty() => {
+                        if self.view.layers.len() > 1 {
+                            self.view.layers.pop();
+                        }
+                    }
+                    _ => (),
+                };
+            };
+
+            self.refresh()?.render()?;
         }
     }
 
@@ -200,10 +211,9 @@ where
     }
 
     fn refresh(&mut self) -> Result<&mut Self> {
-        self.view.head = {
-            let vp = te::Viewport::new(1, 1, 1, self.view.tm.cols);
-            te::HeadLine::new(vp, self)?
-        };
+        let mut head = mem::replace(&mut self.view.head, Default::default());
+        head.refresh(self)?;
+        self.view.head = head;
 
         let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         for layer in layers.iter_mut() {
@@ -211,10 +221,14 @@ where
         }
         self.view.layers = layers;
 
+        let mut status = mem::replace(&mut self.view.status, Default::default());
+        status.refresh(self)?;
+        self.view.status = status;
+
         Ok(self)
     }
 
-    fn queue(&mut self) -> Result<&mut Self> {
+    fn render(&mut self) -> Result<&mut Self> {
         err_at!(Fatal, queue!(self.view.tm.stdout, self.view.head))?;
 
         match self.view.layers.pop() {
@@ -227,12 +241,8 @@ where
 
         err_at!(Fatal, queue!(self.view.tm.stdout, self.view.status))?;
 
-        Ok(self)
-    }
-
-    #[inline]
-    fn flush(&mut self) -> Result<&mut Self> {
         err_at!(Fatal, self.view.tm.stdout.flush())?;
+
         Ok(self)
     }
 }
@@ -283,7 +293,8 @@ where
         self
     }
 
-    pub fn show_cursor_at(&mut self, col: u16, row: u16) -> Result<()> {
+    pub fn show_cursor(&mut self) -> Result<()> {
+        let (col, row) = self.view.cursor;
         err_at!(
             Fatal,
             execute!(
@@ -293,13 +304,13 @@ where
                 cursor::Show,
             )
         )?;
-        err_at!(Fatal, self.view.tm.stdout.flush())?;
 
-        trace!(
-            "show cursor {:?}->{:?}",
-            cursor::position(),
-            (col - 1, row - 1)
-        );
+        Ok(())
+    }
+
+    pub fn move_cursor(&mut self, col: u16, row: u16) -> Result<()> {
+        trace!("move cursor {:?}->{:?}", cursor::position(), (col, row));
+        self.view.cursor = (col, row);
 
         Ok(())
     }

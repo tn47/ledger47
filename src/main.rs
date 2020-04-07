@@ -97,7 +97,7 @@ fn init_logger(opts: &Opt) -> Result<()> {
 
     err_at!(
         Fatal,
-        simplelog::WriteLogger::init(simplelog::LevelFilter::Trace, config.build(), fs)
+        simplelog::WriteLogger::init(level_filter, config.build(), fs)
     )?;
 
     Ok(())

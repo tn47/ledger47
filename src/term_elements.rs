@@ -267,6 +267,18 @@ impl Viewport {
         self.vp_cursor_off
     }
 
+    pub fn to_cursor(&self) -> (u16, u16) {
+        let (col, row) = self.to_origin();
+        let (coff, roff) = self.to_cursor_off();
+        (col + coff, row + roff)
+    }
+
+    fn to_ed_cursor(&self, ed_origin: (usize, usize)) -> (usize, usize) {
+        let col = ed_origin.0 + (self.vp_cursor_off.0 as usize);
+        let row = ed_origin.1 + (self.vp_cursor_off.1 as usize);
+        (col, row)
+    }
+
     pub fn apply_ed_cursor(&mut self, ed_cursor: (usize, usize)) {
         let (cdiff, rdiff) = match (self.to_ed_cursor(self.ed_origin), ed_cursor) {
             ((old_c, old_r), (new_c, new_r)) => (
@@ -308,12 +320,6 @@ impl Viewport {
         self.ed_origin = (ed_col, ed_row);
         self.vp_cursor_off = (vp_col, vp_row);
     }
-
-    fn to_ed_cursor(&self, ed_origin: (usize, usize)) -> (usize, usize) {
-        let col = ed_origin.0 + (self.vp_cursor_off.0 as usize);
-        let row = ed_origin.1 + (self.vp_cursor_off.1 as usize);
-        (col, row)
-    }
 }
 
 #[derive(Clone)]
@@ -346,7 +352,7 @@ impl HeadLine {
         Ok(HeadLine { vp, date, period })
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    pub fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
@@ -688,7 +694,7 @@ impl StatusLine {
         }
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    pub fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
@@ -774,15 +780,13 @@ impl EditLine {
     where
         S: Store,
     {
-        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor_off()) {
-            ((col, row), (c, r)) => (col + c, row + r),
-        };
+        let (col, row) = self.vp.to_cursor();
         trace!(
             "Focus edit-line {:?} {:?}",
             self.vp.to_origin(),
             self.vp.to_cursor_off()
         );
-        app.show_cursor_at(col, row)
+        app.move_cursor(col, row)
     }
 
     fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
@@ -792,11 +796,11 @@ impl EditLine {
         Ok(())
     }
 
-    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    fn handle_event<S>(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
     where
         S: Store,
     {
-        match (to_modifiers(&evnt), to_key_code(&evnt)) {
+        let evnt = match (to_modifiers(&evnt), to_key_code(&evnt)) {
             (_, Some(KeyCode::Enter))
             | (_, Some(KeyCode::Up))
             | (_, Some(KeyCode::Down))
@@ -814,7 +818,12 @@ impl EditLine {
                     Ok(evnt)
                 }
             },
-        }
+        }?;
+
+        let (col, row) = self.vp.to_cursor();
+        app.move_cursor(col, row)?;
+
+        Ok(evnt)
     }
 }
 
@@ -915,7 +924,7 @@ impl EditBox {
         let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor_off()) {
             ((col, row), (c, r)) => (col + c, row + r),
         };
-        app.show_cursor_at(col, row)
+        app.move_cursor(col, row)
     }
 
     fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>

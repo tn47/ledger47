@@ -23,27 +23,27 @@ impl<S> Layer<S>
 where
     S: Store,
 {
-    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
-        match self {
-            Layer::NewWorkspace(layer) => layer.refresh(app),
-        }
-    }
-
     pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
         match self {
             Layer::NewWorkspace(layer) => layer.focus(app),
         }
     }
 
-    pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
+    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
         match self {
-            Layer::NewWorkspace(layer) => layer.leave(app),
+            Layer::NewWorkspace(layer) => layer.refresh(app),
         }
     }
 
     pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
         match self {
             Layer::NewWorkspace(layer) => layer.handle_event(app, evnt),
+        }
+    }
+
+    pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
+        match self {
+            Layer::NewWorkspace(layer) => layer.leave(app),
         }
     }
 }
@@ -68,6 +68,7 @@ where
     vp: te::Viewport,
     elements: Vec<te::Element>,
     refresh: usize,
+    in_focus: bool,
     focus: Vec<usize>,
 
     _phantom_s: marker::PhantomData<S>,
@@ -133,6 +134,7 @@ where
             vp,
             elements,
             refresh: Default::default(),
+            in_focus: Default::default(),
             focus: vec![2, 4, 5, 6],
 
             _phantom_s: marker::PhantomData,
@@ -141,7 +143,6 @@ where
 
     pub fn refresh(&mut self, _app: &mut Application<S>) -> Result<()> {
         self.refresh += 1;
-
         Ok(())
     }
 
@@ -157,10 +158,13 @@ where
 
         self.elements[off].focus(app)?;
 
+        self.in_focus = true;
         Ok(())
     }
 
     pub fn leave(&mut self, _app: &mut Application<S>) -> Result<()> {
+        self.in_focus = Default::default();
+        self.refresh = Default::default();
         Ok(())
     }
 
@@ -208,22 +212,17 @@ where
         );
 
         let mut output: String = Default::default();
-        if self.refresh > 1 {
-            output.push_str(&self.elements[2].to_string());
-            output.push_str(&self.elements[4].to_string());
-            output.push_str(&self.elements[5].to_string());
-            output.push_str(&self.elements[6].to_string());
-            output
-        } else {
+        if self.refresh < 2 {
             let s = String::from_iter(repeat(' ').take(width as usize));
             for r in 0..height {
                 output.push_str(&cursor::MoveTo(col - 1, row + r).to_string());
                 output.push_str(&style::style(&s).on(te::BG_LAYER).to_string());
             }
-            for element in self.elements.iter() {
-                output.push_str(&element.to_string());
-            }
-            output
         }
+        for element in self.elements.iter() {
+            output.push_str(&element.to_string());
+        }
+
+        output
     }
 }

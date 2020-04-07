@@ -1,11 +1,12 @@
 use crossterm::{
+    cursor,
     event::{Event, KeyCode},
-    Command as TermCommand,
+    style, Command as TermCommand,
 };
 use log::trace;
 use unicode_width::UnicodeWidthStr;
 
-use std::marker;
+use std::{iter::FromIterator, marker};
 
 use crate::app::Application;
 use crate::term_elements::{self as te};
@@ -66,6 +67,7 @@ where
 {
     vp: te::Viewport,
     elements: Vec<te::Element>,
+    refresh: usize,
     focus: Vec<usize>,
 
     _phantom_s: marker::PhantomData<S>,
@@ -130,6 +132,7 @@ where
         Ok(NewWorkspace {
             vp,
             elements,
+            refresh: Default::default(),
             focus: vec![2, 4, 5, 6],
 
             _phantom_s: marker::PhantomData,
@@ -137,6 +140,8 @@ where
     }
 
     pub fn refresh(&mut self, _app: &mut Application<S>) -> Result<()> {
+        self.refresh += 1;
+
         Ok(())
     }
 
@@ -189,6 +194,8 @@ where
     type AnsiType = String;
 
     fn ansi_code(&self) -> Self::AnsiType {
+        use std::iter::repeat;
+
         let (col, row) = self.vp.to_origin();
         let (height, width) = self.vp.to_size();
 
@@ -201,9 +208,22 @@ where
         );
 
         let mut output: String = Default::default();
-        for element in self.elements.iter() {
-            output.push_str(&element.to_string());
+        if self.refresh > 1 {
+            output.push_str(&self.elements[2].to_string());
+            output.push_str(&self.elements[4].to_string());
+            output.push_str(&self.elements[5].to_string());
+            output.push_str(&self.elements[6].to_string());
+            output
+        } else {
+            let s = String::from_iter(repeat(' ').take(width as usize));
+            for r in 0..height {
+                output.push_str(&cursor::MoveTo(col - 1, row + r).to_string());
+                output.push_str(&style::style(&s).on(te::BG_LAYER).to_string());
+            }
+            for element in self.elements.iter() {
+                output.push_str(&element.to_string());
+            }
+            output
         }
-        output
     }
 }

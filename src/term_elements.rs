@@ -400,7 +400,9 @@ impl fmt::Display for HeadLine {
 
         let mut line = {
             let n = (width as usize) - s_per0.len() - s_per1.len() - s_date.len() - 3;
-            String::from_iter(repeat(' ').take(n))
+            style::style(&String::from_iter(repeat(' ').take(n)))
+                .on(BG_LAYER)
+                .to_string()
         };
         line.push_str(&format!(
             "{}{}{}{}{}",
@@ -795,12 +797,12 @@ impl EditLine {
         S: Store,
     {
         match (to_modifiers(&evnt), to_key_code(&evnt)) {
-            (m, Some(KeyCode::Enter))
-            | (m, Some(KeyCode::Up))
-            | (m, Some(KeyCode::Down))
-            | (m, Some(KeyCode::PageUp))
-            | (m, Some(KeyCode::PageDown))
-            | (m, Some(KeyCode::Tab)) => Ok(Some(evnt)),
+            (_, Some(KeyCode::Enter))
+            | (_, Some(KeyCode::Up))
+            | (_, Some(KeyCode::Down))
+            | (_, Some(KeyCode::PageUp))
+            | (_, Some(KeyCode::PageDown))
+            | (_, Some(KeyCode::Tab)) => Ok(Some(evnt)),
             (m, Some(KeyCode::BackTab)) if m.is_empty() => Ok(Some(evnt)),
             _ => match self.buffer.handle_event(evnt)? {
                 EditRes {
@@ -844,7 +846,7 @@ impl fmt::Display for EditLine {
             String::from_iter(self.inline.chars().take(n_inline))
         };
         let buf_line = {
-            let (ed_col, ed_row) = self.vp.to_ed_origin();
+            let (ed_col, _ed_row) = self.vp.to_ed_origin();
             let mut lines = self
                 .buffer
                 .to_lines(0, 1)
@@ -858,7 +860,7 @@ impl fmt::Display for EditLine {
                 .collect::<Vec<Vec<char>>>();
             String::from_iter(match lines.len() {
                 0 => vec![].into_iter(),
-                n => lines.remove(0).into_iter(),
+                _ => lines.remove(0).into_iter(),
             })
         };
 

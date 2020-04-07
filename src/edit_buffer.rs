@@ -120,7 +120,7 @@ impl InsertEvent {
                 let (prev_line, cur_line) = (lines.prev(), lines.next());
                 match (prev_line, cur_line) {
                     (None, _) => update_cursor!(buf, *cursor, *cursor, None),
-                    (Some(pline), Some(cline)) => {
+                    (Some(pline), Some(_)) => {
                         let row_at = line_idx - 1;
                         let col_at = {
                             let cur_col_at = *cursor - buf.line_to_char(line_idx);
@@ -137,7 +137,7 @@ impl InsertEvent {
                 let (cur_line, next_line) = (lines.next(), lines.next());
                 match (cur_line, next_line) {
                     (None, _) => update_cursor!(buf, *cursor, *cursor, None),
-                    (Some(pline), None) => update_cursor!(buf, *cursor, *cursor, None),
+                    (Some(_), None) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(cline), Some(nline)) => {
                         let row_at = line_idx + 1;
                         let col_at = {
@@ -146,7 +146,6 @@ impl InsertEvent {
                         };
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
-                    _ => err_at!(Fatal, msg: format!("unreachable"))?,
                 }
             }
             Home => {

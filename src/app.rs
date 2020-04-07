@@ -2,7 +2,7 @@ use chrono;
 use crossterm::{
     cursor,
     event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
-    execute, queue, style,
+    execute, queue,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use log::{debug, info, trace};
@@ -215,17 +215,6 @@ where
     }
 
     fn queue(&mut self) -> Result<&mut Self> {
-        err_at!(
-            Fatal,
-            queue!(
-                self.view.tm.stdout,
-                cursor::Hide,
-                cursor::MoveTo(0, 0),
-                style::SetBackgroundColor(te::BG_LAYER),
-                terminal::Clear(terminal::ClearType::All),
-            )
-        )?;
-
         err_at!(Fatal, queue!(self.view.tm.stdout, self.view.head))?;
 
         match self.view.layers.pop() {

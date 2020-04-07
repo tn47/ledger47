@@ -69,7 +69,7 @@ where
     elements: Vec<te::Element>,
     refresh: usize,
     in_focus: bool,
-    focus: Vec<usize>,
+    focus: TabOffsets,
 
     _phantom_s: marker::PhantomData<S>,
 }
@@ -135,7 +135,7 @@ where
             elements,
             refresh: Default::default(),
             in_focus: Default::default(),
-            focus: vec![2, 4, 5, 6],
+            focus: TabOffsets::new(vec![2, 4, 5, 6, -1]),
 
             _phantom_s: marker::PhantomData,
         })
@@ -153,8 +153,10 @@ where
     }
 
     pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
-        let off = self.focus.first().unwrap().clone();
-        self.elements[off].leave(app)?;
+        let off = self.focus.current();
+        if off >= 0 {
+            self.elements[off as usize].leave(app)?;
+        }
 
         self.in_focus = Default::default();
         self.refresh = Default::default();
@@ -162,40 +164,52 @@ where
     }
 
     pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
-        let off = self.focus.first().unwrap().clone();
-        self.elements[off].handle_event(app, evnt)?;
-
-        match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
-            (modifiers, Some(code)) if modifiers.is_empty() => match code {
-                KeyCode::Enter | KeyCode::Tab => {
-                    let off = self.focus.remove(0);
-                    self.focus.push(off);
-                    self.focus_element(app)?;
-                    Ok(None)
-                }
-                KeyCode::BackTab => {
-                    let off = self.focus.pop().unwrap();
-                    self.focus.insert(0, off);
-                    self.focus_element(app)?;
-                    Ok(None)
-                }
+        let off = self.focus.current();
+        let evnt = if off >= 0 {
+            self.elements[off as usize].handle_event(app, evnt)?
+        } else {
+            Some(evnt)
+        };
+        match evnt {
+            Some(evnt) => match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+                (modifiers, Some(code)) if modifiers.is_empty() => match code {
+                    KeyCode::Esc => {
+                        self.focus.tab_to(-1);
+                        self.focus_element(app)?;
+                        Ok(None)
+                    }
+                    KeyCode::Enter | KeyCode::Tab => {
+                        self.focus.tab();
+                        self.focus_element(app)?;
+                        Ok(None)
+                    }
+                    KeyCode::BackTab => {
+                        self.focus.back_tab();
+                        self.focus_element(app)?;
+                        Ok(None)
+                    }
+                    _ => Ok(Some(evnt)),
+                },
                 _ => Ok(Some(evnt)),
             },
-            _ => Ok(Some(evnt)),
+            None => Ok(None),
         }
     }
 
     fn focus_element(&mut self, app: &mut Application<S>) -> Result<()> {
-        let off = self.focus.first().unwrap().clone();
-        match &mut self.elements[off] {
-            te::Element::EditLine(e) => e.clear_inline()?,
-            te::Element::EditBox(e) => e.clear_inline()?,
-            _ => (),
-        };
-
-        trace!("Focus layer_new_workspace off:{}", off);
-
-        self.elements[off].focus(app)?;
+        let off = self.focus.current();
+        if off >= 0 {
+            let off = off as usize;
+            match &mut self.elements[off] {
+                te::Element::EditLine(e) => e.clear_inline()?,
+                te::Element::EditBox(e) => e.clear_inline()?,
+                _ => (),
+            };
+            trace!("Focus layer_new_workspace off:{}", off);
+            self.elements[off].focus(app)?;
+        } else {
+            app.hide_cursor();
+        }
 
         Ok(())
     }
@@ -234,5 +248,38 @@ where
         }
 
         output
+    }
+}
+
+struct TabOffsets(Vec<isize>);
+
+impl TabOffsets {
+    fn new(offs: Vec<isize>) -> TabOffsets {
+        TabOffsets(offs)
+    }
+
+    fn current(&self) -> isize {
+        self.0.first().unwrap().clone()
+    }
+
+    fn tab(&mut self) -> isize {
+        let off = self.0.remove(0);
+        self.0.push(off);
+        off
+    }
+
+    fn back_tab(&mut self) -> isize {
+        let off = self.0.pop().unwrap();
+        self.0.insert(0, off);
+        off
+    }
+
+    fn tab_to(&mut self, off: isize) {
+        for (i, val) in self.0.clone().into_iter().enumerate() {
+            if off == val {
+                self.0.remove(i);
+                self.0.insert(0, off);
+            }
+        }
     }
 }

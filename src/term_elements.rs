@@ -158,6 +158,7 @@ pub struct Viewport {
     width: u16,
     ed_origin: (usize, usize), // absolute (col, row) within buffer, (0,0)
     vp_cursor_off: (u16, u16), // (col-offset, row-offset)
+    scroll_off: u16,
 }
 
 impl fmt::Display for Viewport {
@@ -180,13 +181,13 @@ impl Viewport {
             width,
             ed_origin: Default::default(),
             vp_cursor_off: Default::default(),
+            scroll_off: Default::default(),
         }
     }
 
     #[inline]
-    pub fn move_to(mut self, col: u16, row: u16) -> Self {
-        self.col = col;
-        self.row = row;
+    pub fn set_scroll_off(&mut self, scroll_off: u16) -> &mut Self {
+        self.scroll_off = scroll_off;
         self
     }
 
@@ -201,13 +202,6 @@ impl Viewport {
     pub fn resize_to(mut self, height: u16, width: u16) -> Self {
         self.height = height;
         self.width = width;
-        self
-    }
-
-    #[inline]
-    pub fn resize_by(mut self, height_off: i16, width_off: i16) -> Self {
-        self.height = ((self.height as i16) + height_off) as u16;
-        self.width = ((self.width as i16) + width_off) as u16;
         self
     }
 }
@@ -290,18 +284,20 @@ impl Viewport {
         let ccol = ((self.col + self.vp_cursor_off.0) as isize) + cdiff;
         let crow = ((self.row + self.vp_cursor_off.1) as isize) + rdiff;
 
+        let top = (self.to_top() + self.scroll_off) as isize;
+        let bottom = (self.to_bottom() - self.scroll_off) as isize;
+
         let (vp_col, ed_col): (u16, usize) = if ccol < (self.to_left() as isize) {
             (0, ed_cursor.0)
         } else if ccol > (self.to_right() as isize) {
             (self.width - 1, ed_cursor.0 - (self.width as usize) + 1)
         } else {
             let new_col: u16 = ccol.try_into().unwrap();
-            trace!("{} {} {}", ccol, new_col, self.col);
             (new_col - self.col, self.ed_origin.0)
         };
-        let (vp_row, ed_row): (u16, usize) = if crow < (self.to_top() as isize) {
+        let (vp_row, ed_row): (u16, usize) = if crow < top {
             (0, ed_cursor.1)
-        } else if crow > (self.to_bottom() as isize) {
+        } else if crow > bottom {
             (self.height - 1, ed_cursor.1 - (self.height as usize) + 1)
         } else {
             let new_row: u16 = crow.try_into().unwrap();
@@ -802,6 +798,7 @@ impl EditLine {
     {
         let evnt = match (to_modifiers(&evnt), to_key_code(&evnt)) {
             (_, Some(KeyCode::Enter))
+            | (_, Some(KeyCode::Esc))
             | (_, Some(KeyCode::Up))
             | (_, Some(KeyCode::Down))
             | (_, Some(KeyCode::PageUp))
@@ -920,10 +917,12 @@ impl EditBox {
     where
         S: Store,
     {
-        trace!("Focus edit-box");
-        let (col, row) = match (self.vp.to_origin(), self.vp.to_cursor_off()) {
-            ((col, row), (c, r)) => (col + c, row + r),
-        };
+        let (col, row) = self.vp.to_cursor();
+        trace!(
+            "Focus edit-box {:?} {:?}",
+            self.vp.to_origin(),
+            self.vp.to_cursor_off()
+        );
         app.move_cursor(col, row)
     }
 
@@ -934,20 +933,28 @@ impl EditBox {
         Ok(())
     }
 
-    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    fn handle_event<S>(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
     where
         S: Store,
     {
-        match evnt {
-            Event::Key(KeyEvent {
-                code: KeyCode::Enter,
-                ..
-            }) => Ok(Some(evnt)),
-            evnt => {
-                let er = self.buffer.handle_event(evnt)?;
-                Ok(er.evnt)
-            }
-        }
+        let evnt = match (to_modifiers(&evnt), to_key_code(&evnt)) {
+            (m, Some(KeyCode::BackTab)) if m.is_empty() => Ok(Some(evnt)),
+            _ => match self.buffer.handle_event(evnt)? {
+                EditRes {
+                    col_at,
+                    row_at,
+                    evnt,
+                } => {
+                    self.vp.apply_ed_cursor((col_at, row_at));
+                    Ok(evnt)
+                }
+            },
+        }?;
+
+        let (col, row) = self.vp.to_cursor();
+        app.move_cursor(col, row)?;
+
+        Ok(evnt)
     }
 }
 

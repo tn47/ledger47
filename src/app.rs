@@ -55,7 +55,7 @@ where
     status: te::StatusLine,
     // cmd: te::CmdLine,
     focus: ViewFocus,
-    cursor: (u16, u16),
+    cursor: Option<(u16, u16)>,
 }
 
 impl<S> View<S>
@@ -76,7 +76,7 @@ where
             layers: Default::default(),
             status: Default::default(),
             focus: ViewFocus::Layer,
-            cursor: (1, 1),
+            cursor: Some((1, 1)),
         })
     }
 
@@ -294,23 +294,32 @@ where
     }
 
     pub fn show_cursor(&mut self) -> Result<()> {
-        let (col, row) = self.view.cursor;
-        err_at!(
-            Fatal,
-            execute!(
-                self.view.tm.stdout,
-                cursor::MoveTo(col - 1, row - 1),
-                cursor::EnableBlinking,
-                cursor::Show,
-            )
-        )?;
+        match self.view.cursor {
+            Some((col, row)) => err_at!(
+                Fatal,
+                execute!(
+                    self.view.tm.stdout,
+                    cursor::MoveTo(col - 1, row - 1),
+                    cursor::EnableBlinking,
+                    cursor::Show,
+                )
+            )?,
+            None => err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide,))?,
+        }
+
+        Ok(())
+    }
+
+    pub fn hide_cursor(&mut self) -> Result<()> {
+        trace!("move cursor {:?}->None", cursor::position());
+        self.view.cursor = None;
 
         Ok(())
     }
 
     pub fn move_cursor(&mut self, col: u16, row: u16) -> Result<()> {
         trace!("move cursor {:?}->{:?}", cursor::position(), (col, row));
-        self.view.cursor = (col, row);
+        self.view.cursor = Some((col, row));
 
         Ok(())
     }

@@ -16,8 +16,8 @@ pub trait Durable: Default + Clone {
     fn decode(&mut self, from: &str) -> Result<()>;
 }
 
-pub trait Store {
-    //type Txn: Transaction;
+pub trait Store: Sized {
+    type Txn: Transaction<Self>;
 
     fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
@@ -35,26 +35,43 @@ pub trait Store {
     where
         V: 'static + Durable;
 
-    fn iter_transaction(
+    fn iter_journal(
         &mut self,
         from: chrono::DateTime<chrono::Utc>,
         to: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Box<dyn Iterator<Item = Result<types::Transaction>>>>;
+    ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>>;
+
+    fn begin(self) -> Self::Txn;
 }
 
-//pub trait Transaction {
-//    fn put<V>(&mut self, value: V) -> Result<Option<V>>
-//    where
-//        V: Durable;
-//
-//    fn get<V>(&mut self, key: &str) -> Result<V>
-//    where
-//        V: Durable;
-//
-//    fn delete<V>(&mut self, key: &str) -> Result<V>
-//    where
-//        V: Durable;
-//}
+pub trait Transaction<S>: Sized
+where
+    S: Store,
+{
+    fn put<V>(&mut self, value: V) -> Result<Option<V>>
+    where
+        V: Durable;
+
+    fn get<V>(&mut self, key: &str) -> Result<V>
+    where
+        V: Durable;
+
+    fn delete<V>(&mut self, key: &str) -> Result<V>
+    where
+        V: Durable;
+
+    fn iter<V>(&mut self) -> Result<Box<dyn Iterator<Item = Result<V>>>>
+    where
+        V: 'static + Durable;
+
+    fn iter_journal(
+        &mut self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>>;
+
+    fn commit(&mut self) -> Result<S>;
+}
 
 #[derive(Clone)]
 pub enum Error {

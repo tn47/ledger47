@@ -738,7 +738,7 @@ impl TryFrom<(String, String, f64)> for Debitor {
 }
 
 #[derive(Clone, JsonSerialize)]
-pub struct Transaction {
+pub struct JournalEntry {
     pub(crate) uuid: u128,
     pub(crate) payee: String,
     #[json(to_string)]
@@ -749,29 +749,29 @@ pub struct Transaction {
     pub(crate) note: String,
 }
 
-impl Eq for Transaction {}
+impl Eq for JournalEntry {}
 
-impl PartialOrd for Transaction {
+impl PartialOrd for JournalEntry {
     fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
         self.created.partial_cmp(&rhs.created)
     }
 }
 
-impl PartialEq for Transaction {
+impl PartialEq for JournalEntry {
     fn eq(&self, rhs: &Self) -> bool {
         self.created.eq(&rhs.created)
     }
 }
 
-impl Ord for Transaction {
+impl Ord for JournalEntry {
     fn cmp(&self, rhs: &Self) -> cmp::Ordering {
         self.created.cmp(&rhs.created)
     }
 }
 
-impl Default for Transaction {
-    fn default() -> Transaction {
-        Transaction {
+impl Default for JournalEntry {
+    fn default() -> JournalEntry {
+        JournalEntry {
             uuid: Default::default(),
             payee: Default::default(),
             created: chrono::Utc::now(),
@@ -793,7 +793,7 @@ impl
         Vec<Debitor>,
         String,
         String,
-    )> for Transaction
+    )> for JournalEntry
 {
     type Error = Error;
 
@@ -807,7 +807,7 @@ impl
             String,
             String,
         ),
-    ) -> Result<Transaction> {
+    ) -> Result<JournalEntry> {
         let payee = payee.trim().to_string();
         let created: chrono::DateTime<chrono::Utc> = {
             let created = created.trim().to_string();
@@ -832,7 +832,7 @@ impl
             tags
         };
 
-        Ok(Transaction {
+        Ok(JournalEntry {
             uuid,
             payee,
             created,
@@ -844,9 +844,9 @@ impl
     }
 }
 
-impl Transaction {
-    fn new(payee: String, created: chrono::DateTime<chrono::Utc>) -> Transaction {
-        Transaction {
+impl JournalEntry {
+    fn new(payee: String, created: chrono::DateTime<chrono::Utc>) -> JournalEntry {
+        JournalEntry {
             uuid: uuid::Uuid::new_v4().as_u128(),
             payee,
             created,
@@ -891,9 +891,9 @@ impl Transaction {
     }
 }
 
-impl Durable for Transaction {
+impl Durable for JournalEntry {
     fn to_type(&self) -> String {
-        "transaction".to_string()
+        "journalentry".to_string()
     }
 
     fn to_key(&self) -> String {

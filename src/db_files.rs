@@ -1,9 +1,9 @@
 use chrono::{self, offset::TimeZone, Datelike};
 
-use std::{ffi, fs, path};
+use std::{ffi, fs, mem, path};
 
 use crate::{
-    core::{Durable, Error, Result, Store},
+    core::{Durable, Error, Result, Store, Transaction},
     types::{self, Workspace},
 };
 
@@ -123,6 +123,7 @@ impl From<FileLoc> for ffi::OsString {
     }
 }
 
+#[derive(Default)]
 pub struct Db {
     dir: ffi::OsString,
     w: Workspace,
@@ -176,6 +177,8 @@ impl Db {
 }
 
 impl Store for Db {
+    type Txn = DbTransaction;
+
     fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
         V: Durable,
@@ -185,7 +188,7 @@ impl Store for Db {
                 let meta_dir = self.to_metadata_dir();
                 meta_dir.put(value)
             }
-            "transaction" => {
+            "journalentry" => {
                 let jrn_dir = self.to_journal_dir();
                 jrn_dir.put(value)
             }
@@ -204,7 +207,7 @@ impl Store for Db {
                 let meta_dir = self.to_metadata_dir();
                 meta_dir.get(key)
             }
-            "transaction" => {
+            "journalentry" => {
                 let jrn_dir = self.to_journal_dir();
                 jrn_dir.get(key)
             }
@@ -223,7 +226,7 @@ impl Store for Db {
                 let meta_dir = self.to_metadata_dir();
                 meta_dir.delete(key)
             }
-            "transaction" => {
+            "journalentry" => {
                 let jrn_dir = self.to_journal_dir();
                 jrn_dir.delete(key)
             }
@@ -239,13 +242,64 @@ impl Store for Db {
         Ok(Box::new(iter))
     }
 
-    fn iter_transaction(
+    fn iter_journal(
         &mut self,
         from: chrono::DateTime<chrono::Utc>,
         to: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Box<dyn Iterator<Item = Result<types::Transaction>>>> {
+    ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>> {
         let iter = self.to_journal_dir().iter(from, to)?;
         Ok(Box::new(iter))
+    }
+
+    fn begin(self) -> DbTransaction {
+        DbTransaction { db: self }
+    }
+}
+
+pub struct DbTransaction {
+    db: Db,
+}
+
+impl Transaction<Db> for DbTransaction {
+    fn put<V>(&mut self, value: V) -> Result<Option<V>>
+    where
+        V: Durable,
+    {
+        self.db.put(value)
+    }
+
+    fn get<V>(&mut self, key: &str) -> Result<V>
+    where
+        V: Durable,
+    {
+        self.db.get(key)
+    }
+
+    fn delete<V>(&mut self, key: &str) -> Result<V>
+    where
+        V: Durable,
+    {
+        self.db.delete(key)
+    }
+
+    fn iter<V>(&mut self) -> Result<Box<dyn Iterator<Item = Result<V>>>>
+    where
+        V: 'static + Durable,
+    {
+        self.db.iter()
+    }
+
+    fn iter_journal(
+        &mut self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>> {
+        self.db.iter_journal(from, to)
+    }
+
+    fn commit(&mut self) -> Result<Db> {
+        let db = mem::replace(&mut self.db, Default::default());
+        Ok(db)
     }
 }
 
@@ -374,7 +428,7 @@ impl JournalDir {
 struct IterTransaction {
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
-    iter: JournalYears<types::Transaction>,
+    iter: JournalYears<types::JournalEntry>,
     done: bool,
 }
 
@@ -395,7 +449,7 @@ impl IterTransaction {
 }
 
 impl Iterator for IterTransaction {
-    type Item = Result<types::Transaction>;
+    type Item = Result<types::JournalEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {

@@ -855,10 +855,10 @@ impl fmt::Display for EditLine {
             let (ed_col, _ed_row) = self.vp.to_ed_origin();
             let mut lines = self
                 .buffer
-                .to_lines(0, 1)
-                .into_iter()
+                .lines_at(0)
                 .map(|s| {
-                    s.chars()
+                    s.to_string()
+                        .chars()
                         .skip(ed_col)
                         .take(width as usize)
                         .collect::<Vec<char>>()
@@ -1001,8 +1001,8 @@ impl fmt::Display for EditBox {
             "{}",
             style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
-        let (from, till) = self.vp.to_ed_origin();
-        for (i, line) in self.buffer.to_lines(from, till + 1).into_iter().enumerate() {
+        let (_, from) = self.vp.to_ed_origin();
+        for (i, line) in self.buffer.lines_at(from).enumerate().take(height as usize) {
             write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
             write!(
                 f,

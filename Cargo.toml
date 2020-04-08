@@ -19,7 +19,7 @@ uuid = { version = "0.8.1", features = ["v4"] }
 crossterm = "0.16.0"
 unicode-width = "0.1.5"
 ropey = "1.1.0"
-log = { version = "0.4.8", features = ["max_level_trace", "release_max_level_trace"] }
+log = { version = "0.4.8", features = ["max_level_trace", "release_max_level_debug"] }
 simplelog = "0.7.5"
 dirs = "2.0.2"
 crossbeam = "0.7.3"

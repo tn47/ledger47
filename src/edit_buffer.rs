@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use log::trace;
-use ropey::Rope;
+use ropey::{iter::Lines, Rope};
 
 use std::{cmp, io};
 
@@ -62,25 +62,27 @@ enum InsertEvent {
 
 impl From<Event> for InsertEvent {
     fn from(evnt: Event) -> InsertEvent {
+        let m = to_modifiers(&evnt);
+        let ctrl = m.contains(KeyModifiers::CONTROL);
+        // let shift = m.contains(KeyModifiers::SHIFT);
         match evnt {
             Event::Key(KeyEvent { code, modifiers }) => match code {
-                KeyCode::Backspace if to_modifiers(&evnt).is_empty() => InsertEvent::Backspace,
-                KeyCode::Enter if to_modifiers(&evnt).is_empty() => InsertEvent::Enter,
-                KeyCode::Left if to_modifiers(&evnt).is_empty() => InsertEvent::Left,
-                KeyCode::Right if to_modifiers(&evnt).is_empty() => InsertEvent::Right,
-                KeyCode::Up if to_modifiers(&evnt).is_empty() => InsertEvent::Up,
-                KeyCode::Down if to_modifiers(&evnt).is_empty() => InsertEvent::Down,
-                KeyCode::Home if to_modifiers(&evnt).is_empty() => InsertEvent::Home,
-                KeyCode::End if to_modifiers(&evnt).is_empty() => InsertEvent::End,
-                KeyCode::PageUp if to_modifiers(&evnt).is_empty() => InsertEvent::PageUp,
-                KeyCode::PageDown if to_modifiers(&evnt).is_empty() => InsertEvent::PageDown,
-                KeyCode::Tab if to_modifiers(&evnt).is_empty() => InsertEvent::Tab,
-                KeyCode::BackTab if to_modifiers(&evnt).is_empty() => InsertEvent::BackTab,
-                KeyCode::Delete if to_modifiers(&evnt).is_empty() => InsertEvent::Delete,
-                KeyCode::F(f) if to_modifiers(&evnt).is_empty() => InsertEvent::F(f, modifiers),
-                KeyCode::Char(ch) if to_modifiers(&evnt).is_empty() => {
-                    InsertEvent::Char(ch, modifiers)
-                }
+                KeyCode::Backspace if m.is_empty() => InsertEvent::Backspace,
+                KeyCode::Enter if m.is_empty() => InsertEvent::Enter,
+                KeyCode::Left if m.is_empty() => InsertEvent::Left,
+                KeyCode::Right if m.is_empty() => InsertEvent::Right,
+                KeyCode::Up if m.is_empty() => InsertEvent::Up,
+                KeyCode::Down if m.is_empty() => InsertEvent::Down,
+                KeyCode::Home if m.is_empty() => InsertEvent::Home,
+                KeyCode::End if m.is_empty() => InsertEvent::End,
+                KeyCode::PageUp if m.is_empty() => InsertEvent::PageUp,
+                KeyCode::PageDown if m.is_empty() => InsertEvent::PageDown,
+                KeyCode::Tab if m.is_empty() => InsertEvent::Tab,
+                KeyCode::BackTab if m.is_empty() => InsertEvent::BackTab,
+                KeyCode::Delete if m.is_empty() => InsertEvent::Delete,
+                KeyCode::F(f) if m.is_empty() => InsertEvent::F(f, modifiers),
+                KeyCode::Char('[') if ctrl => InsertEvent::Esc,
+                KeyCode::Char(ch) if m.is_empty() => InsertEvent::Char(ch, modifiers),
                 KeyCode::Esc if to_modifiers(&evnt).is_empty() => InsertEvent::Esc,
                 KeyCode::Insert | KeyCode::Null => InsertEvent::Noop,
                 _ => InsertEvent::Noop,
@@ -132,7 +134,8 @@ impl InsertEvent {
                     (None, _) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(pline), Some(_)) => {
                         let row_at = line_idx - 1;
-                        let col_at = cmp::min(pline.len_chars(), *cursor - start_idx);
+                        let col_at = cmp::min(pline.len_chars() - 1, *cursor - start_idx);
+                        trace!("pline {} {} {}", pline.to_string(), row_at, col_at);
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
                     _ => err_at!(Fatal, msg: format!("unreachable"))?,
@@ -146,7 +149,7 @@ impl InsertEvent {
                     (Some(_), None) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(_), Some(nline)) => {
                         let row_at = line_idx + 1;
-                        let col_at = cmp::min(nline.len_chars(), *cursor - start_idx);
+                        let col_at = cmp::min(nline.len_chars() - 1, *cursor - start_idx);
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
                 }
@@ -371,15 +374,13 @@ impl Buffer {
         .to_string()
     }
 
-    pub fn to_lines(&self, from: usize, till: usize) -> Vec<String> {
+    pub fn lines_at(&self, from: usize) -> Lines {
         let buf = match self {
             Buffer::Normal { buf, .. } => buf,
             Buffer::Insert { buf, .. } => buf,
             Buffer::Replace { buf, .. } => buf,
         };
-        (from..till)
-            .map(|line_idx| buf.line(line_idx).to_string())
-            .collect()
+        buf.lines_at(from)
     }
 }
 

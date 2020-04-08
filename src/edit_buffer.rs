@@ -4,7 +4,10 @@ use ropey::{iter::Lines, Rope};
 
 use std::{cmp, io};
 
-use ledger::core::{Error, Result};
+use ledger::{
+    core::{Error, Result},
+    err_at,
+};
 
 const NEW_LINE_CHAR: char = '\n';
 

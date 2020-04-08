@@ -208,7 +208,7 @@ where
             trace!("Focus layer_new_workspace off:{}", off);
             self.elements[off].focus(app)?;
         } else {
-            app.hide_cursor();
+            app.hide_cursor()?;
         }
 
         Ok(())

@@ -1,5 +1,9 @@
 use chrono::{self, Datelike};
 
+use std::str::FromStr;
+
+use crate::core::{Error, Result};
+
 #[macro_export]
 macro_rules! err_at {
     ($v:ident, msg:$msg:expr) => {
@@ -75,4 +79,42 @@ where
     } else {
         (tz.ymd(date.year(), 4, 1), tz.ymd(date.year() + 1, 3, 31))
     }
+}
+
+pub fn csv<T>(s: String) -> Result<Vec<T>>
+where
+    T: FromStr,
+{
+    let mut ys = vec![];
+    let xs: Vec<&str> = s.split(',').collect();
+    for x in xs.into_iter() {
+        match x.parse() {
+            Ok(y) => Ok(ys.push(y)),
+            Err(_) => Err(Error::ConvertFail("invalid csv".to_string())),
+        }?
+    }
+
+    Ok(ys)
+}
+
+pub fn str_as_anuh(s: &str) -> bool {
+    for ch in s.chars() {
+        match ch {
+            '-' | '_' => (),
+            ch if ch.is_alphanumeric() => (),
+            _ => return false,
+        }
+    }
+    true
+}
+
+pub fn str_as_anuhdc(s: &str) -> bool {
+    for ch in s.chars() {
+        match ch {
+            '-' | '_' | '.' | ':' => (),
+            ch if ch.is_alphanumeric() => (),
+            _ => return false,
+        }
+    }
+    true
 }

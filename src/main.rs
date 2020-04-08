@@ -5,16 +5,16 @@ use structopt::StructOpt;
 
 use std::fs;
 
-#[macro_use]
-mod util;
-
 mod app;
 mod edit_buffer;
 mod event;
 mod term_elements;
 mod term_layers;
 
-use ledger::core::{Error, Result};
+use ledger::{
+    core::{Error, Result},
+    err_at,
+};
 
 // commands:
 //      blinking, hide, show, enablemousecapture, disablemousecapture, clear, setsize,

@@ -2,9 +2,15 @@ use chrono::{self, Datelike};
 use jsondata::{Json, JsonSerialize};
 use uuid;
 
-use std::{cmp, convert::TryInto};
+use std::{
+    cmp,
+    convert::{TryFrom, TryInto},
+};
 
-use crate::core::{Durable, Error, Result, Store};
+use crate::{
+    core::{Durable, Error, Result, Store},
+    util,
+};
 
 pub type Key = String;
 
@@ -28,6 +34,41 @@ impl From<Group> for String {
 pub struct Workspace {
     name: String,
     commodity: Key,
+    remotes: Vec<String>,
+}
+
+// TryFrom<(name, commodity-key, remotes)>
+impl TryFrom<(String, String, String)> for Workspace {
+    type Error = Error;
+
+    fn try_from((name, commodity_key, remotes): (String, String, String)) -> Result<Workspace> {
+        let name = {
+            let name = name.trim().to_string();
+            if util::str_as_anuh(name.as_str()) == false {
+                Err(Error::InvalidInput("name".to_string()))
+            } else {
+                Ok(name)
+            }
+        }?;
+        let commodity = {
+            let commodity = commodity_key.trim().to_string();
+            if util::str_as_anuh(commodity.as_str()) == false {
+                Err(Error::InvalidInput("commodity".to_string()))
+            } else {
+                Ok(commodity)
+            }
+        }?;
+        let remotes: Vec<String> = {
+            let err = Error::InvalidInput("remotes".to_string());
+            util::csv(remotes.trim().to_string()).map_err(|_| err.clone())?
+        };
+
+        Ok(Workspace {
+            name,
+            commodity,
+            remotes,
+        })
+    }
 }
 
 impl Default for Workspace {
@@ -35,6 +76,7 @@ impl Default for Workspace {
         Workspace {
             name: Default::default(),
             commodity: Default::default(),
+            remotes: Default::default(),
         }
     }
 }
@@ -48,6 +90,11 @@ impl Workspace {
 
     fn set_commodity(mut self, commodity: Key) -> Self {
         self.commodity = commodity;
+        self
+    }
+
+    fn add_remote(&mut self, remote: String) -> &mut Self {
+        self.remotes.push(remote);
         self
     }
 
@@ -94,9 +141,61 @@ pub struct Commodity {
     note: String,
 }
 
+// From<(name, value)>
 impl From<(String, f64)> for Commodity {
     fn from((name, value): (String, f64)) -> Commodity {
         Commodity::new(name, value)
+    }
+}
+
+// TryFrom<(name, symbol, aliases, tags, note)>
+impl TryFrom<(String, String, String, String, String)> for Commodity {
+    type Error = Error;
+
+    fn try_from(
+        (name, symbol, aliases, tags, note): (String, String, String, String, String),
+    ) -> Result<Commodity> {
+        let name = {
+            let name = name.trim().to_string();
+            if util::str_as_anuh(name.as_str()) == false {
+                Err(Error::InvalidInput("name".to_string()))
+            } else {
+                Ok(name)
+            }
+        }?;
+        let symbol = symbol.trim().to_string();
+        let aliases = {
+            let err = Error::InvalidInput("aliases".to_string());
+            let aliases: Vec<String> =
+                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            for alias in aliases.iter() {
+                let alias = alias.trim().to_string();
+                if util::str_as_anuhdc(alias.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            aliases
+        };
+        let tags = {
+            let err = Error::InvalidInput("tags".to_string());
+            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            for tag in tags.iter() {
+                let tag = tag.trim().to_string();
+                if util::str_as_anuhdc(tag.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            tags
+        };
+
+        Ok(Commodity {
+            name,
+            value: Default::default(),
+            symbol,
+            aliases,
+            tags,
+            note,
+        })
     }
 }
 
@@ -226,6 +325,62 @@ impl Default for Company {
     }
 }
 
+// TryFrom<(name, created, aliases, tags, note)>
+impl TryFrom<(String, String, String, String, String)> for Company {
+    type Error = Error;
+
+    fn try_from(
+        (name, created, aliases, tags, note): (String, String, String, String, String),
+    ) -> Result<Company> {
+        let name = {
+            let name = name.trim().to_string();
+            if util::str_as_anuh(name.as_str()) == false {
+                Err(Error::InvalidInput("name".to_string()))
+            } else {
+                Ok(name)
+            }
+        }?;
+        let created: chrono::DateTime<chrono::Utc> = {
+            let created = created.trim().to_string();
+            match created.parse() {
+                Ok(created) => Ok(created),
+                Err(_) => Err(Error::InvalidInput("created".to_string())),
+            }
+        }?;
+        let aliases = {
+            let err = Error::InvalidInput("aliases".to_string());
+            let aliases: Vec<String> =
+                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            for alias in aliases.iter() {
+                let alias = alias.trim().to_string();
+                if util::str_as_anuhdc(alias.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            aliases
+        };
+        let tags = {
+            let err = Error::InvalidInput("tags".to_string());
+            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            for tag in tags.iter() {
+                let tag = tag.trim().to_string();
+                if util::str_as_anuhdc(tag.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            tags
+        };
+
+        Ok(Company {
+            name,
+            created,
+            aliases,
+            tags,
+            note,
+        })
+    }
+}
+
 impl Company {
     fn new(name: String, created: chrono::DateTime<chrono::Utc>) -> Company {
         Company {
@@ -330,6 +485,78 @@ impl Default for Ledger {
     }
 }
 
+// TryFrom<(name, created, company-key, aliases, tags, note)>
+impl TryFrom<(String, String, String, String, String, String)> for Ledger {
+    type Error = Error;
+
+    fn try_from(
+        (name, created, company_key, aliases, tags, note): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        ),
+    ) -> Result<Ledger> {
+        let name = {
+            let name = name.trim().to_string();
+            if util::str_as_anuh(name.as_str()) == false {
+                Err(Error::InvalidInput("name".to_string()))
+            } else {
+                Ok(name)
+            }
+        }?;
+        let created: chrono::DateTime<chrono::Utc> = {
+            let created = created.trim().to_string();
+            match created.parse() {
+                Ok(created) => Ok(created),
+                Err(_) => Err(Error::InvalidInput("created".to_string())),
+            }
+        }?;
+        let company = {
+            let company = company_key.trim().to_string();
+            if util::str_as_anuh(company.as_str()) == false {
+                Err(Error::InvalidInput("company".to_string()))
+            } else {
+                Ok(company)
+            }
+        }?;
+        let aliases = {
+            let err = Error::InvalidInput("aliases".to_string());
+            let aliases: Vec<String> =
+                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            for alias in aliases.iter() {
+                let alias = alias.trim().to_string();
+                if util::str_as_anuhdc(alias.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            aliases
+        };
+        let tags = {
+            let err = Error::InvalidInput("tags".to_string());
+            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            for tag in tags.iter() {
+                let tag = tag.trim().to_string();
+                if util::str_as_anuhdc(tag.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            tags
+        };
+
+        Ok(Ledger {
+            name,
+            created,
+            company,
+            aliases,
+            tags,
+            note,
+        })
+    }
+}
+
 impl Ledger {
     fn new(name: String, created: chrono::DateTime<chrono::Utc>, company: Key) -> Ledger {
         Ledger {
@@ -416,10 +643,67 @@ pub(crate) struct Creditor {
     commodity: (Key, f64),
 }
 
+// TryFrom<(ledger-key, commodity-key)>
+impl TryFrom<(String, String, f64)> for Creditor {
+    type Error = Error;
+
+    fn try_from((ledger_key, commodity_key, value): (String, String, f64)) -> Result<Creditor> {
+        let ledger = {
+            let ledger_key = ledger_key.trim().to_string();
+            if util::str_as_anuh(ledger_key.as_str()) == false {
+                Err(Error::InvalidInput("ledger".to_string()))
+            } else {
+                Ok(ledger_key)
+            }
+        }?;
+        let commodity = {
+            let commodity = commodity_key.trim().to_string();
+            if util::str_as_anuh(commodity.as_str()) == false {
+                Err(Error::InvalidInput("commodity".to_string()))
+            } else {
+                Ok(commodity)
+            }
+        }?;
+
+        Ok(Creditor {
+            ledger,
+            commodity: (commodity, value).into(),
+        })
+    }
+}
 #[derive(Clone, JsonSerialize)]
 pub(crate) struct Debitor {
     ledger: Key,
     commodity: (Key, f64),
+}
+
+// TryFrom<(ledger-key, commodity-key)>
+impl TryFrom<(String, String, f64)> for Debitor {
+    type Error = Error;
+
+    fn try_from((ledger_key, commodity_key, value): (String, String, f64)) -> Result<Debitor> {
+        let ledger = {
+            let ledger_key = ledger_key.trim().to_string();
+            if util::str_as_anuh(ledger_key.as_str()) == false {
+                Err(Error::InvalidInput("ledger".to_string()))
+            } else {
+                Ok(ledger_key)
+            }
+        }?;
+        let commodity = {
+            let commodity = commodity_key.trim().to_string();
+            if util::str_as_anuh(commodity.as_str()) == false {
+                Err(Error::InvalidInput("commodity".to_string()))
+            } else {
+                Ok(commodity)
+            }
+        }?;
+
+        Ok(Debitor {
+            ledger,
+            commodity: (commodity, value).into(),
+        })
+    }
 }
 
 #[derive(Clone, JsonSerialize)]
@@ -465,6 +749,63 @@ impl Default for Transaction {
             tags: Default::default(),
             note: Default::default(),
         }
+    }
+}
+
+// TryFrom<(uuid, payee, created, creditors, debitors, tags, note)>
+impl
+    TryFrom<(
+        u128,
+        String,
+        String,
+        Vec<Creditor>,
+        Vec<Debitor>,
+        String,
+        String,
+    )> for Transaction
+{
+    type Error = Error;
+
+    fn try_from(
+        (uuid, payee, created, creditors, debitors, tags, note): (
+            u128,
+            String,
+            String,
+            Vec<Creditor>,
+            Vec<Debitor>,
+            String,
+            String,
+        ),
+    ) -> Result<Transaction> {
+        let payee = payee.trim().to_string();
+        let created: chrono::DateTime<chrono::Utc> = {
+            let created = created.trim().to_string();
+            match created.parse() {
+                Ok(created) => Ok(created),
+                Err(_) => Err(Error::InvalidInput("created".to_string())),
+            }
+        }?;
+        let tags = {
+            let err = Error::InvalidInput("tags".to_string());
+            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            for tag in tags.iter() {
+                let tag = tag.trim().to_string();
+                if util::str_as_anuhdc(tag.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            tags
+        };
+
+        Ok(Transaction {
+            uuid,
+            payee,
+            created,
+            creditors,
+            debitors,
+            tags,
+            note,
+        })
     }
 }
 

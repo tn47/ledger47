@@ -19,9 +19,11 @@ use std::{
 use crate::{
     app::Application,
     edit_buffer::{Buffer, EditRes},
+};
+use ledger::{
+    core::{Result, Store},
     util,
 };
-use ledger::core::{Result, Store};
 
 pub const MIN_COL: u64 = 1;
 pub const MIN_ROW: u64 = 1;

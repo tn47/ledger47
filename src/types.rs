@@ -14,22 +14,6 @@ use crate::{
 
 pub type Key = String;
 
-struct Group {
-    name: String,
-}
-
-impl From<String> for Group {
-    fn from(name: String) -> Group {
-        Group { name }
-    }
-}
-
-impl From<Group> for String {
-    fn from(g: Group) -> String {
-        g.name
-    }
-}
-
 #[derive(Clone, JsonSerialize)]
 pub struct Workspace {
     name: String,
@@ -60,7 +44,11 @@ impl TryFrom<(String, String, String)> for Workspace {
         }?;
         let remotes: Vec<String> = {
             let err = Error::InvalidInput("remotes".to_string());
-            util::csv(remotes.trim().to_string()).map_err(|_| err.clone())?
+            util::csv::<String>(remotes.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect()
         };
 
         Ok(Workspace {
@@ -166,8 +154,11 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
         let symbol = symbol.trim().to_string();
         let aliases = {
             let err = Error::InvalidInput("aliases".to_string());
-            let aliases: Vec<String> =
-                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            let aliases: Vec<String> = util::csv::<String>(aliases.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for alias in aliases.iter() {
                 let alias = alias.trim().to_string();
                 if util::str_as_anuhdc(alias.as_str()) == false {
@@ -178,7 +169,11 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
         };
         let tags = {
             let err = Error::InvalidInput("tags".to_string());
-            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            let tags: Vec<String> = util::csv::<String>(tags.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for tag in tags.iter() {
                 let tag = tag.trim().to_string();
                 if util::str_as_anuhdc(tag.as_str()) == false {
@@ -349,8 +344,11 @@ impl TryFrom<(String, String, String, String, String)> for Company {
         }?;
         let aliases = {
             let err = Error::InvalidInput("aliases".to_string());
-            let aliases: Vec<String> =
-                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            let aliases: Vec<String> = util::csv::<String>(aliases.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for alias in aliases.iter() {
                 let alias = alias.trim().to_string();
                 if util::str_as_anuhdc(alias.as_str()) == false {
@@ -361,7 +359,11 @@ impl TryFrom<(String, String, String, String, String)> for Company {
         };
         let tags = {
             let err = Error::InvalidInput("tags".to_string());
-            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            let tags: Vec<String> = util::csv::<String>(tags.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for tag in tags.iter() {
                 let tag = tag.trim().to_string();
                 if util::str_as_anuhdc(tag.as_str()) == false {
@@ -467,6 +469,7 @@ pub struct Ledger {
     created: chrono::DateTime<chrono::Utc>,
     company: Key,
 
+    groups: Vec<String>,
     aliases: Vec<String>,
     tags: Vec<String>,
     note: String,
@@ -478,6 +481,7 @@ impl Default for Ledger {
             name: Default::default(),
             created: chrono::Utc::now(),
             company: Default::default(),
+            groups: Default::default(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
@@ -485,12 +489,13 @@ impl Default for Ledger {
     }
 }
 
-// TryFrom<(name, created, company-key, aliases, tags, note)>
-impl TryFrom<(String, String, String, String, String, String)> for Ledger {
+// TryFrom<(name, created, company-key, groups, aliases, tags, note)>
+impl TryFrom<(String, String, String, String, String, String, String)> for Ledger {
     type Error = Error;
 
     fn try_from(
-        (name, created, company_key, aliases, tags, note): (
+        (name, created, company_key, groups, aliases, tags, note): (
+            String,
             String,
             String,
             String,
@@ -522,10 +527,28 @@ impl TryFrom<(String, String, String, String, String, String)> for Ledger {
                 Ok(company)
             }
         }?;
+        let groups = {
+            let err = Error::InvalidInput("groups".to_string());
+            let groups: Vec<String> = util::csv::<String>(groups.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
+            for group in groups.iter() {
+                let group = group.trim().to_string();
+                if util::str_as_anuhdc(group.as_str()) == false {
+                    return Err(err);
+                }
+            }
+            groups
+        };
         let aliases = {
             let err = Error::InvalidInput("aliases".to_string());
-            let aliases: Vec<String> =
-                util::csv(aliases.trim().to_string()).map_err(|_| err.clone())?;
+            let aliases: Vec<String> = util::csv::<String>(aliases.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for alias in aliases.iter() {
                 let alias = alias.trim().to_string();
                 if util::str_as_anuhdc(alias.as_str()) == false {
@@ -536,7 +559,11 @@ impl TryFrom<(String, String, String, String, String, String)> for Ledger {
         };
         let tags = {
             let err = Error::InvalidInput("tags".to_string());
-            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            let tags: Vec<String> = util::csv::<String>(tags.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for tag in tags.iter() {
                 let tag = tag.trim().to_string();
                 if util::str_as_anuhdc(tag.as_str()) == false {
@@ -550,6 +577,7 @@ impl TryFrom<(String, String, String, String, String, String)> for Ledger {
             name,
             created,
             company,
+            groups,
             aliases,
             tags,
             note,
@@ -563,6 +591,7 @@ impl Ledger {
             name,
             created,
             company,
+            groups: Default::default(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
@@ -787,7 +816,11 @@ impl
         }?;
         let tags = {
             let err = Error::InvalidInput("tags".to_string());
-            let tags: Vec<String> = util::csv(tags.trim().to_string()).map_err(|_| err.clone())?;
+            let tags: Vec<String> = util::csv::<String>(tags.trim().to_string())
+                .map_err(|_| err.clone())?
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect();
             for tag in tags.iter() {
                 let tag = tag.trim().to_string();
                 if util::str_as_anuhdc(tag.as_str()) == false {

@@ -1,5 +1,7 @@
 use std::{fmt, result};
 
+use crate::types;
+
 pub type Result<T> = result::Result<T, Error>;
 
 // data-types and report-types can be durable.
@@ -15,18 +17,44 @@ pub trait Durable: Default + Clone {
 }
 
 pub trait Store {
-    fn put<V>(&self, value: V) -> Result<Option<V>>
+    //type Txn: Transaction;
+
+    fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
         V: Durable;
 
-    fn get<V>(&self, key: &str) -> Result<V>
+    fn get<V>(&mut self, key: &str) -> Result<V>
     where
         V: Durable;
 
-    fn delete<V>(&self, key: &str) -> Result<V>
+    fn delete<V>(&mut self, key: &str) -> Result<V>
     where
         V: Durable;
+
+    fn iter<V>(&mut self) -> Result<Box<dyn Iterator<Item = Result<V>>>>
+    where
+        V: 'static + Durable;
+
+    fn iter_transaction(
+        &mut self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Box<dyn Iterator<Item = Result<types::Transaction>>>>;
 }
+
+//pub trait Transaction {
+//    fn put<V>(&mut self, value: V) -> Result<Option<V>>
+//    where
+//        V: Durable;
+//
+//    fn get<V>(&mut self, key: &str) -> Result<V>
+//    where
+//        V: Durable;
+//
+//    fn delete<V>(&mut self, key: &str) -> Result<V>
+//    where
+//        V: Durable;
+//}
 
 #[derive(Clone)]
 pub enum Error {

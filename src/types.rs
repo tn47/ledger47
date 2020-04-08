@@ -85,12 +85,14 @@ impl Workspace {
         self.remotes.push(remote);
         self
     }
+}
 
+impl Workspace {
     fn to_name(&self) -> String {
         self.name.to_string()
     }
 
-    fn to_commodity<S>(&self, store: S) -> Result<Commodity>
+    fn to_commodity<S>(&mut self, store: &mut S) -> Result<Commodity>
     where
         S: Store,
     {
@@ -127,6 +129,25 @@ pub struct Commodity {
     aliases: Vec<String>,
     tags: Vec<String>,
     note: String,
+}
+
+impl Default for Commodity {
+    fn default() -> Commodity {
+        Commodity {
+            name: Default::default(),
+            value: Default::default(),
+            symbol: Default::default(),
+            aliases: Default::default(),
+            tags: Default::default(),
+            note: Default::default(),
+        }
+    }
+}
+
+impl From<Commodity> for (String, f64) {
+    fn from(c: Commodity) -> (String, f64) {
+        (c.name, c.value)
+    }
 }
 
 // From<(name, value)>
@@ -191,25 +212,6 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
             tags,
             note,
         })
-    }
-}
-
-impl From<Commodity> for (String, f64) {
-    fn from(c: Commodity) -> (String, f64) {
-        (c.name, c.value)
-    }
-}
-
-impl Default for Commodity {
-    fn default() -> Commodity {
-        Commodity {
-            name: Default::default(),
-            value: Default::default(),
-            symbol: Default::default(),
-            aliases: Default::default(),
-            tags: Default::default(),
-            note: Default::default(),
-        }
     }
 }
 

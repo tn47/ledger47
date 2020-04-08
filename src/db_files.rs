@@ -4,7 +4,7 @@ use std::{ffi, fs, path};
 
 use crate::{
     core::{Durable, Error, Result, Store},
-    types::{Transaction, Workspace},
+    types::{self, Workspace},
 };
 
 // TODO: what is here is a crash when calling put() API ?
@@ -159,8 +159,24 @@ impl Db {
     }
 }
 
+impl Db {
+    pub fn to_metadata_dir(&self) -> MetadataDir {
+        let mut pp = path::PathBuf::new();
+        pp.push(&self.dir);
+        pp.push("metadata");
+        MetadataDir(pp.into_os_string())
+    }
+
+    pub fn to_journal_dir(&self) -> JournalDir {
+        let mut pp = path::PathBuf::new();
+        pp.push(path::Path::new(&self.dir));
+        pp.push("journal");
+        JournalDir(pp.into_os_string())
+    }
+}
+
 impl Store for Db {
-    fn put<V>(&self, value: V) -> Result<Option<V>>
+    fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
         V: Durable,
     {
@@ -177,7 +193,7 @@ impl Store for Db {
         }
     }
 
-    fn get<V>(&self, key: &str) -> Result<V>
+    fn get<V>(&mut self, key: &str) -> Result<V>
     where
         V: Durable,
     {
@@ -196,7 +212,7 @@ impl Store for Db {
         }
     }
 
-    fn delete<V>(&self, key: &str) -> Result<V>
+    fn delete<V>(&mut self, key: &str) -> Result<V>
     where
         V: Durable,
     {
@@ -214,21 +230,22 @@ impl Store for Db {
             _ => err_at!(Fatal, msg: format!("unreachable"))?,
         }
     }
-}
 
-impl Db {
-    pub fn to_metadata_dir(&self) -> MetadataDir {
-        let mut pp = path::PathBuf::new();
-        pp.push(&self.dir);
-        pp.push("metadata");
-        MetadataDir(pp.into_os_string())
+    fn iter<V>(&mut self) -> Result<Box<dyn Iterator<Item = Result<V>>>>
+    where
+        V: 'static + Durable,
+    {
+        let iter = self.to_metadata_dir().iter()?;
+        Ok(Box::new(iter))
     }
 
-    pub fn to_journal_dir(&self) -> JournalDir {
-        let mut pp = path::PathBuf::new();
-        pp.push(path::Path::new(&self.dir));
-        pp.push("journal");
-        JournalDir(pp.into_os_string())
+    fn iter_transaction(
+        &mut self,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Box<dyn Iterator<Item = Result<types::Transaction>>>> {
+        let iter = self.to_journal_dir().iter(from, to)?;
+        Ok(Box::new(iter))
     }
 }
 
@@ -280,14 +297,14 @@ impl MetadataDir {
         file_loc.delete()
     }
 
-    pub fn iter<V>(&self) -> Result<impl Iterator<Item = V>>
+    pub fn iter<V>(&self) -> Result<std::vec::IntoIter<Result<V>>>
     where
         V: Durable,
     {
         let mut dfs = vec![];
         for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
             let item = err_at!(IOError, item, format!("{:?}", self.0))?;
-            dfs.push(FileLoc::new(&self.0, &item.file_name()).to_value()?);
+            dfs.push(Ok(FileLoc::new(&self.0, &item.file_name()).to_value()?));
         }
 
         Ok(dfs.into_iter())
@@ -349,15 +366,15 @@ impl JournalDir {
         &self,
         from: chrono::DateTime<chrono::Utc>,
         to: chrono::DateTime<chrono::Utc>,
-    ) -> impl Iterator<Item = Result<Transaction>> {
-        IterTransaction::new(self.0.clone(), from, to)
+    ) -> Result<IterTransaction> {
+        Ok(IterTransaction::new(self.0.clone(), from, to))
     }
 }
 
 struct IterTransaction {
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
-    iter: JournalYears<Transaction>,
+    iter: JournalYears<types::Transaction>,
     done: bool,
 }
 
@@ -378,7 +395,7 @@ impl IterTransaction {
 }
 
 impl Iterator for IterTransaction {
-    type Item = Result<Transaction>;
+    type Item = Result<types::Transaction>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {

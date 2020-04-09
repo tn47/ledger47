@@ -34,7 +34,8 @@ pub const BG_EDIT: Color = Color::AnsiValue(232);
 pub const FG_PERIOD: Color = Color::AnsiValue(27);
 pub const FG_DATE: Color = Color::AnsiValue(33);
 pub const FG_TITLE: Color = Color::AnsiValue(6);
-pub const FG_BORDER: Color = Color::AnsiValue(15);
+pub const FG_BORDER: Color = Color::AnsiValue(243);
+pub const FG_BORDER_HL: Color = Color::AnsiValue(255);
 pub const FG_EDIT_INLINE: Color = Color::AnsiValue(59);
 pub const FG_EDIT: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
@@ -426,6 +427,7 @@ impl fmt::Display for HeadLine {
 pub struct Title {
     vp: Viewport,
     content: String,
+    term_cache: String,
 }
 
 impl_command!(Title);
@@ -433,7 +435,23 @@ impl_command!(Title);
 impl Title {
     pub fn new(vp: Viewport, content: &str) -> Result<Title> {
         let content = " ".to_string() + content + " ";
-        Ok(Title { vp, content })
+        let mut em = Title {
+            vp,
+            content,
+            term_cache: Default::default(),
+        };
+
+        let (col, row) = em.vp.to_origin();
+        em.term_cache
+            .push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        em.term_cache.push_str(
+            &style::style(em.content.clone())
+                .on(BG_LAYER)
+                .with(FG_TITLE)
+                .to_string(),
+        );
+
+        Ok(em)
     }
 
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
@@ -479,27 +497,48 @@ impl fmt::Display for Title {
             width
         );
 
-        write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(self.content.clone())
-                .on(BG_LAYER)
-                .with(FG_TITLE)
-        )
+        write!(f, "{}", self.term_cache)
     }
 }
 
 #[derive(Clone)]
 pub struct Border {
     vp: Viewport,
+    focus: &'static str,
+    tc_normal: String,
+    tc_highlt: String,
 }
 
 impl_command!(Border);
 
 impl Border {
     pub fn new(vp: Viewport) -> Result<Border> {
-        Ok(Border { vp })
+        let mut em = Border {
+            vp,
+            focus: "leave",
+            tc_normal: Default::default(),
+            tc_highlt: Default::default(),
+        };
+
+        let (col, row) = {
+            let (col, row) = em.vp.to_origin();
+            (col - 1, row - 1)
+        };
+        let (ht, wd) = em.vp.to_size();
+
+        em.tc_normal
+            .push_str(&style::SetBackgroundColor(BG_LAYER).to_string());
+        em.tc_normal
+            .push_str(&style::SetForegroundColor(FG_BORDER).to_string());
+        Self::make_term_cache(&mut em.tc_normal, col, row, ht, wd);
+
+        em.tc_highlt
+            .push_str(&style::SetBackgroundColor(BG_LAYER).to_string());
+        em.tc_highlt
+            .push_str(&style::SetForegroundColor(FG_BORDER_HL).to_string());
+        Self::make_term_cache(&mut em.tc_highlt, col, row, ht, wd);
+
+        Ok(em)
     }
 
     fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
@@ -514,6 +553,8 @@ impl Border {
         S: Store,
     {
         trace!("Focus border");
+        self.focus = "focus";
+
         Ok(())
     }
 
@@ -521,6 +562,8 @@ impl Border {
     where
         S: Store,
     {
+        self.focus = "leave";
+
         Ok(())
     }
 
@@ -530,12 +573,43 @@ impl Border {
     {
         Ok(Some(evnt))
     }
+
+    fn make_term_cache(s: &mut String, col: u16, row: u16, ht: u16, wd: u16) {
+        use std::iter::repeat;
+
+        // top
+        s.push_str(&cursor::MoveTo(col, row).to_string());
+        s.push_str(&String::from_iter(repeat('─').take(wd as usize)));
+        // right
+        for h in 0..ht {
+            s.push_str(&cursor::MoveTo(col + wd - 1, row + h).to_string());
+            s.push_str("│");
+        }
+        // botton
+        s.push_str(&cursor::MoveTo(col, row + ht - 1).to_string());
+        s.push_str(&String::from_iter(repeat('─').take(wd as usize)));
+        // left
+        for h in 0..ht {
+            s.push_str(&cursor::MoveTo(col, row + h).to_string());
+            s.push_str("│");
+        }
+        // top-left corner
+        s.push_str(&cursor::MoveTo(col, row).to_string());
+        s.push_str("╭");
+        // top-right corner
+        s.push_str(&cursor::MoveTo(col + wd - 1, row).to_string());
+        s.push_str("╮");
+        // bottom-right corner
+        s.push_str(&cursor::MoveTo(col + wd - 1, row + ht - 1).to_string());
+        s.push_str("╯");
+        // bottom-left corner
+        s.push_str(&cursor::MoveTo(col, row + ht - 1).to_string());
+        s.push_str("╰");
+    }
 }
 
 impl fmt::Display for Border {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        use std::iter::repeat;
-
         let (col, row) = self.vp.to_origin();
         let (ht, wd) = self.vp.to_size();
 
@@ -546,43 +620,12 @@ impl fmt::Display for Border {
             ht,
             wd
         );
-        let (col, row) = (col - 1, row - 1);
 
-        write!(f, "{}", style::SetBackgroundColor(BG_LAYER).to_string())?;
-        write!(f, "{}", style::SetForegroundColor(FG_BORDER).to_string())?;
-
-        // top
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(f, "{}", String::from_iter(repeat('─').take(wd as usize)))?;
-        // right
-        for h in 0..ht {
-            write!(f, "{}", cursor::MoveTo(col + wd - 1, row + h).to_string())?;
-            write!(f, "│")?;
+        match self.focus {
+            "focus" => write!(f, "{}", self.tc_highlt),
+            "leave" => write!(f, "{}", self.tc_normal),
+            _ => panic!("unreachable"),
         }
-        // botton
-        write!(f, "{}", cursor::MoveTo(col, row + ht - 1).to_string())?;
-        write!(f, "{}", String::from_iter(repeat('─').take(wd as usize)))?;
-        // left
-        for h in 0..ht {
-            write!(f, "{}", cursor::MoveTo(col, row + h).to_string())?;
-            write!(f, "│")?;
-        }
-        // top-left corner
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(f, "╭")?;
-        // top-right corner
-        write!(f, "{}", cursor::MoveTo(col + wd - 1, row).to_string())?;
-        write!(f, "╮")?;
-        // bottom-right corner
-        write!(
-            f,
-            "{}",
-            cursor::MoveTo(col + wd - 1, row + ht - 1).to_string()
-        )?;
-        write!(f, "╯")?;
-        // bottom-left corner
-        write!(f, "{}", cursor::MoveTo(col, row + ht - 1).to_string())?;
-        write!(f, "╰")
     }
 }
 

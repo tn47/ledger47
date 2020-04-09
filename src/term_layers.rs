@@ -135,7 +135,7 @@ where
             elements,
             refresh: Default::default(),
             in_focus: Default::default(),
-            focus: TabOffsets::new(vec![2, 4, 5, 6, -1]),
+            focus: TabOffsets::new(vec![2, 4, 5, 6, 0]),
 
             _phantom_s: marker::PhantomData,
         })
@@ -170,21 +170,28 @@ where
         } else {
             Some(evnt)
         };
+
         match evnt {
             Some(evnt) => match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
                 (modifiers, Some(code)) if modifiers.is_empty() => match code {
-                    KeyCode::Esc => {
-                        self.focus.tab_to(-1);
-                        self.focus_element(app)?;
-                        Ok(None)
-                    }
+                    KeyCode::Esc => match self.focus.tab_to(0) {
+                        Some(old_off) => {
+                            self.elements[old_off].leave(app);
+                            self.focus_element(app)?;
+                            app.hide_cursor()?;
+                            Ok(None)
+                        }
+                        None => Ok(None),
+                    },
                     KeyCode::Enter | KeyCode::Tab => {
-                        self.focus.tab();
+                        let old_off = self.focus.tab();
+                        self.elements[old_off].leave(app);
                         self.focus_element(app)?;
                         Ok(None)
                     }
                     KeyCode::BackTab => {
-                        self.focus.back_tab();
+                        let old_off = self.focus.back_tab();
+                        self.elements[old_off].leave(app);
                         self.focus_element(app)?;
                         Ok(None)
                     }
@@ -197,18 +204,19 @@ where
     }
 
     fn focus_element(&mut self, app: &mut Application<S>) -> Result<()> {
-        let off = self.focus.current();
-        if off >= 0 {
-            let off = off as usize;
-            match &mut self.elements[off] {
+        let em_idx = self.focus.current();
+        trace!("Focus layer_new_workspace em_idx:{}", em_idx);
+
+        if em_idx == 0 {
+            self.elements[em_idx].focus(app)?;
+            app.hide_cursor()?;
+        } else {
+            match &mut self.elements[em_idx] {
                 te::Element::EditLine(e) => e.clear_inline()?,
                 te::Element::EditBox(e) => e.clear_inline()?,
                 _ => (),
             };
-            trace!("Focus layer_new_workspace off:{}", off);
-            self.elements[off].focus(app)?;
-        } else {
-            app.hide_cursor()?;
+            self.elements[em_idx].focus(app)?;
         }
 
         Ok(())
@@ -251,35 +259,40 @@ where
     }
 }
 
-struct TabOffsets(Vec<isize>);
+struct TabOffsets(Vec<usize>);
 
 impl TabOffsets {
-    fn new(offs: Vec<isize>) -> TabOffsets {
+    fn new(offs: Vec<usize>) -> TabOffsets {
         TabOffsets(offs)
     }
 
-    fn current(&self) -> isize {
+    fn current(&self) -> usize {
         self.0.first().unwrap().clone()
     }
 
-    fn tab(&mut self) -> isize {
-        let off = self.0.remove(0);
-        self.0.push(off);
-        off
+    fn tab(&mut self) -> usize {
+        let old_off = self.0.remove(0);
+        self.0.push(old_off);
+        old_off
     }
 
-    fn back_tab(&mut self) -> isize {
+    fn back_tab(&mut self) -> usize {
+        let old_off = self.current();
         let off = self.0.pop().unwrap();
         self.0.insert(0, off);
-        off
+        old_off
     }
 
-    fn tab_to(&mut self, off: isize) {
+    fn tab_to(&mut self, off: usize) -> Option<usize> {
         for (i, val) in self.0.clone().into_iter().enumerate() {
-            if off == val {
-                self.0.remove(i);
+            if off == val && i == 0 {
+                return None;
+            } else if off == val {
+                let old_off = self.0.remove(i);
                 self.0.insert(0, off);
+                return Some(old_off);
             }
         }
+        unreachable!()
     }
 }

@@ -170,8 +170,8 @@ impl Db {
             }
 
             db.w.set_txn_uuid(0);
-            db.put(db.w.clone());
-            db.do_commit("user commit");
+            db.put(db.w.clone())?;
+            db.do_commit("user commit")?;
 
             Ok(db)
         } else {
@@ -209,7 +209,7 @@ impl Db {
         let file_loc = FileLoc::from_key(&dir, "workspace");
         file_loc.put(db.w.clone())?;
 
-        db.do_commit("user commit");
+        db.do_commit("user commit")?;
 
         Ok(db)
     }
@@ -390,7 +390,7 @@ impl Store for Db {
     fn begin(mut self) -> Result<DbTransaction> {
         let uuid = uuid::Uuid::new_v4().as_u128();
         self.w.set_txn_uuid(uuid);
-        self.put(self.w.clone());
+        self.put(self.w.clone())?;
 
         let (old_head_oid, new_head_oid) = self.do_commit(&format!("txn commit {}", uuid))?;
         trace!("git txn-commit {}->{}", old_head_oid, new_head_oid);
@@ -477,7 +477,7 @@ impl Transaction<Db> for DbTransaction {
 
         let mut db = mem::replace(&mut self.db, Default::default());
         db.w.set_txn_uuid(0);
-        db.put(db.w.clone());
+        db.put(db.w.clone())?;
 
         Ok(db)
     }

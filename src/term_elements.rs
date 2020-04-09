@@ -1004,13 +1004,17 @@ impl fmt::Display for EditBox {
             style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
         )?;
         let (_, from) = self.vp.to_ed_origin();
+        let (ed_col, _ed_row) = self.vp.to_ed_origin();
         for (i, line) in self.buffer.lines_at(from).enumerate().take(height as usize) {
+            let line: Vec<char> = line
+                .to_string()
+                .chars()
+                .skip(ed_col)
+                .take(width as usize)
+                .collect();
+            let line = String::from_iter(line.into_iter());
             write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
-            write!(
-                f,
-                "{}",
-                style::style(line.to_string()).on(BG_EDIT).with(FG_EDIT)
-            )?;
+            write!(f, "{}", style::style(line).on(BG_EDIT).with(FG_EDIT))?;
         }
 
         Ok(())

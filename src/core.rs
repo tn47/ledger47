@@ -41,7 +41,13 @@ pub trait Store: Sized {
         to: chrono::DateTime<chrono::Utc>,
     ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>>;
 
-    fn begin(self) -> Self::Txn;
+    fn commit(&mut self) -> Result<()>;
+
+    fn pull(&mut self) -> Result<()>;
+
+    fn push(&mut self) -> Result<()>;
+
+    fn begin(self) -> Result<Self::Txn>;
 }
 
 pub trait Transaction<S>: Sized
@@ -70,7 +76,7 @@ where
         to: chrono::DateTime<chrono::Utc>,
     ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>>;
 
-    fn commit(&mut self) -> Result<S>;
+    fn end(&mut self) -> Result<S>;
 }
 
 #[derive(Clone)]

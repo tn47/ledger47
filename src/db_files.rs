@@ -1,4 +1,6 @@
 use chrono::{self, offset::TimeZone, Datelike};
+use git2;
+use log::trace;
 
 use std::{ffi, fs, mem, path};
 
@@ -7,7 +9,7 @@ use crate::{
     types::{self, Workspace},
 };
 
-// TODO: what is here is a crash when calling put() API ?
+// TODO: add git description.
 
 #[derive(Clone)]
 pub struct FileLoc(ffi::OsString);
@@ -91,12 +93,6 @@ impl FileLoc {
 }
 
 impl FileLoc {
-    fn to_old_version(&self) -> FileLoc {
-        let mut old = self.clone();
-        old.0.push(".old");
-        old
-    }
-
     fn to_value<V>(&self) -> Result<V>
     where
         V: Durable,
@@ -107,13 +103,6 @@ impl FileLoc {
         let s = err_at!(InvalidJson, std::str::from_utf8(&data), typ)?;
         value.decode(s)?;
         Ok(value)
-    }
-
-    fn is_old_version(&self) -> bool {
-        match self.0.to_str() {
-            Some(file_loc) => file_loc.ends_with(".old"),
-            None => false,
-        }
     }
 }
 
@@ -127,6 +116,8 @@ impl From<FileLoc> for ffi::OsString {
 pub struct Db {
     dir: ffi::OsString,
     w: Workspace,
+    repo: Option<git2::Repository>,
+    remotes: Vec<git2::Repository>,
 }
 
 impl Db {
@@ -134,20 +125,82 @@ impl Db {
         let w_dir = path::Path::new(dir);
         if w_dir.exists() {
             let file_loc = FileLoc::from_key(dir, "workspace");
-            let value: Workspace = file_loc.to_value()?;
-            Ok(Db {
+            let w: Workspace = file_loc.to_value()?;
+
+            let repo = err_at!(
+                IOError,
+                git2::Repository::open(dir),
+                format!("can't open git repository: {:?}", dir)
+            )?;
+
+            let mut remotes = vec![];
+            for remote in w.remotes.iter() {
+                let remote: &ffi::OsStr = remote.as_ref();
+                remotes.push(err_at!(
+                    IOError,
+                    git2::Repository::open(remote),
+                    format!("can't open remote git repository: {:?}", remote)
+                )?);
+            }
+
+            let mut db = Db {
                 dir: w_dir.as_os_str().to_os_string(),
-                w: value,
-            })
+                w,
+                repo: Some(repo),
+                remotes,
+            };
+
+            // check for broken transactions.
+            {
+                let head_commit = db.get_head_commit()?;
+                if head_commit.message().unwrap().starts_with("txn commit") {
+                    let parent = err_at!(IOError, head_commit.parent(0), format!("git parent"))?;
+                    let mut cob = git2::build::CheckoutBuilder::new();
+                    cob.force();
+                    err_at!(
+                        IOError,
+                        db.repo.as_ref().unwrap().reset(
+                            parent.as_object(),
+                            git2::ResetType::Hard,
+                            Some(&mut cob)
+                        ),
+                        format!("git reset")
+                    )?;
+                }
+            }
+
+            db.w.set_txn_uuid(0);
+            db.put(db.w.clone());
+            db.do_commit("user commit");
+
+            Ok(db)
         } else {
             err_at!(NotFound, msg: format!("dir:{:?}", dir))?
         }
     }
 
-    pub fn create(dir: ffi::OsString, value: Workspace) -> Result<Db> {
-        let db = Db {
-            dir: dir.clone(),
-            w: value,
+    pub fn create(dir: &ffi::OsStr, w: Workspace) -> Result<Db> {
+        let repo = err_at!(
+            IOError,
+            git2::Repository::init(dir),
+            format!("can't initialise git repository: {:?}", dir)
+        )?;
+
+        let mut remotes = vec![];
+        for remote in w.remotes.iter() {
+            let remote: &ffi::OsStr = remote.as_ref();
+            remotes.push(err_at!(
+                IOError,
+                git2::Repository::open(remote),
+                format!("can't open remote git repository: {:?}", remote)
+            )?);
+        }
+
+        let mut db = Db {
+            dir: dir.to_os_string(),
+            w,
+            repo: Some(repo),
+            remotes,
         };
         err_at!(IOError, fs::create_dir_all(&dir))?;
         err_at!(IOError, fs::create_dir_all(&db.to_metadata_dir().0))?;
@@ -155,6 +208,8 @@ impl Db {
 
         let file_loc = FileLoc::from_key(&dir, "workspace");
         file_loc.put(db.w.clone())?;
+
+        db.do_commit("user commit");
 
         Ok(db)
     }
@@ -173,6 +228,74 @@ impl Db {
         pp.push(path::Path::new(&self.dir));
         pp.push("journal");
         JournalDir(pp.into_os_string())
+    }
+
+    fn get_head_commit(&self) -> Result<git2::Commit> {
+        let old_head_oid = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().refname_to_id("HEAD"),
+            format!("git refname_to_id")
+        )?;
+        let parent = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().find_commit(old_head_oid),
+            format!("git find_commit")
+        )?;
+
+        Ok(parent)
+    }
+
+    fn do_commit(&mut self, message: &str) -> Result<(git2::Oid, git2::Oid)> {
+        // stage the changes.
+        let mut index = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().index(),
+            format!("git error")
+        )?;
+        err_at!(
+            IOError,
+            index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None),
+            format!("git add_all")
+        )?;
+        let oid = err_at!(IOError, index.write_tree(), format!("git write"))?;
+
+        // commit the staged changs.
+        let tree = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().find_tree(oid),
+            format!("git find_tree")
+        )?;
+        let old_head_oid = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().refname_to_id("HEAD"),
+            format!("git refname_to_id")
+        )?;
+        let parent = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().find_commit(old_head_oid),
+            format!("git find_commit")
+        )?;
+        let signature = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().signature(),
+            format!("git signature")
+        )?;
+        let new_head_oid = err_at!(
+            IOError,
+            self.repo.as_ref().unwrap().commit(
+                Some("HEAD"), /*update_ref*/
+                &signature,   /*author*/
+                &signature,   /*committer*/
+                message,
+                &tree,
+                &[&parent],
+            ),
+            format!("git commit")
+        )?;
+
+        trace!("git commit {}->{}", old_head_oid, new_head_oid);
+
+        Ok((old_head_oid, new_head_oid))
     }
 }
 
@@ -251,12 +374,40 @@ impl Store for Db {
         Ok(Box::new(iter))
     }
 
-    fn begin(self) -> DbTransaction {
-        DbTransaction { db: self }
+    fn commit(&mut self) -> Result<()> {
+        self.do_commit("user commit")?;
+        Ok(())
+    }
+
+    fn pull(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    fn push(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    fn begin(mut self) -> Result<DbTransaction> {
+        let uuid = uuid::Uuid::new_v4().as_u128();
+        self.w.set_txn_uuid(uuid);
+        self.put(self.w.clone());
+
+        let (old_head_oid, new_head_oid) = self.do_commit(&format!("txn commit {}", uuid))?;
+        trace!("git txn-commit {}->{}", old_head_oid, new_head_oid);
+
+        Ok(DbTransaction {
+            uuid,
+            old_head_oid,
+            new_head_oid,
+            db: self,
+        })
     }
 }
 
 pub struct DbTransaction {
+    uuid: u128,
+    old_head_oid: git2::Oid,
+    new_head_oid: git2::Oid,
     db: Db,
 }
 
@@ -297,8 +448,37 @@ impl Transaction<Db> for DbTransaction {
         self.db.iter_journal(from, to)
     }
 
-    fn commit(&mut self) -> Result<Db> {
-        let db = mem::replace(&mut self.db, Default::default());
+    fn end(&mut self) -> Result<Db> {
+        {
+            let object = err_at!(
+                IOError,
+                self.db
+                    .repo
+                    .as_ref()
+                    .unwrap()
+                    .find_object(self.old_head_oid, None),
+                format!("git find_object")
+            )?;
+            err_at!(
+                IOError,
+                self.db
+                    .repo
+                    .as_ref()
+                    .unwrap()
+                    .reset(&object, git2::ResetType::Mixed, None),
+                format!("git reset")
+            )?;
+            trace!(
+                "git undo-txn-commit {}<-{}",
+                self.old_head_oid,
+                self.new_head_oid
+            );
+        }
+
+        let mut db = mem::replace(&mut self.db, Default::default());
+        db.w.set_txn_uuid(0);
+        db.put(db.w.clone());
+
         Ok(db)
     }
 }

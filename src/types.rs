@@ -16,9 +16,10 @@ pub type Key = String;
 
 #[derive(Clone, JsonSerialize)]
 pub struct Workspace {
-    name: String,
-    commodity: Key,
-    remotes: Vec<String>,
+    pub name: String,
+    pub commodity: Key,
+    pub remotes: Vec<String>,
+    pub txn_uuid: u128,
 }
 
 // TryFrom<(name, commodity-key, remotes)>
@@ -55,6 +56,7 @@ impl TryFrom<(String, String, String)> for Workspace {
             name,
             commodity,
             remotes,
+            txn_uuid: Default::default(),
         })
     }
 }
@@ -65,24 +67,30 @@ impl Default for Workspace {
             name: Default::default(),
             commodity: Default::default(),
             remotes: Default::default(),
+            txn_uuid: Default::default(),
         }
     }
 }
 
 impl Workspace {
-    fn new(name: String) -> Workspace {
+    pub fn new(name: String) -> Workspace {
         let mut w: Workspace = Default::default();
         w.name = name;
         w
     }
 
-    fn set_commodity(mut self, commodity: Key) -> Self {
+    pub fn set_commodity(mut self, commodity: Key) -> Self {
         self.commodity = commodity;
         self
     }
 
-    fn add_remote(&mut self, remote: String) -> &mut Self {
+    pub fn add_remote(&mut self, remote: String) -> &mut Self {
         self.remotes.push(remote);
+        self
+    }
+
+    pub fn set_txn_uuid(&mut self, uuid: u128) -> &mut Self {
+        self.txn_uuid = uuid;
         self
     }
 }
@@ -97,6 +105,10 @@ impl Workspace {
         S: Store,
     {
         store.get(&self.commodity)
+    }
+
+    fn to_txn_uuid(&mut self) -> u128 {
+        self.txn_uuid
     }
 }
 

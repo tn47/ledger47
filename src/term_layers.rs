@@ -1,15 +1,14 @@
-use crossterm::{
-    cursor,
-    event::{Event, KeyCode},
-    style, Command as TermCommand,
-};
+use crossterm::{cursor, event::KeyCode, style, Command as TermCommand};
 use log::trace;
 use unicode_width::UnicodeWidthStr;
 
 use std::{iter::FromIterator, marker};
 
-use crate::app::Application;
-use crate::term_elements::{self as te};
+use crate::{
+    app::Application,
+    event::Event,
+    term_elements::{self as te},
+};
 use ledger::core::{Result, Store};
 
 pub enum Layer<S>
@@ -67,8 +66,6 @@ where
 {
     vp: te::Viewport,
     elements: Vec<te::Element>,
-    refresh: usize,
-    in_focus: bool,
     focus: TabOffsets,
 
     _phantom_s: marker::PhantomData<S>,
@@ -81,15 +78,9 @@ where
     pub fn new(app: &mut Application<S>) -> Result<NewWorkspace<S>> {
         let vp = app.to_viewport();
 
-        let border = te::Border::new(app, vp.clone()).ok().unwrap();
-        let title = {
-            let content = "Create new workspace".to_string();
-            let title_vp = vp
-                .clone()
-                .move_by(2, 0)
-                .resize_to(1, (content.width() as u16) + 2);
-            te::Title::new(app, title_vp, &content).ok().unwrap()
-        };
+        let border = te::Border::new(app, vp.clone(), "Create new workspace".to_string())
+            .ok()
+            .unwrap();
         let ws_input_name = {
             let inline = "Enter workspace name, only alphanumeric and '_'";
             let input_vp = vp.clone().move_by(5, 3).resize_to(1, 40);
@@ -98,7 +89,7 @@ where
         let comm_head = {
             let content = "Enter default commodity details";
             let comm_vp = vp.clone().move_by(5, 5).resize_to(1, 60);
-            te::TextLine::new(app, comm_vp, content, te::FG_SECTION)
+            te::Span::new(app, comm_vp, content, te::FG_SECTION)
                 .ok()
                 .unwrap()
         };
@@ -120,9 +111,8 @@ where
 
         let elements = vec![
             te::Element::Border(border),
-            te::Element::Title(title),
             te::Element::EditLine(ws_input_name),
-            te::Element::TextLine(comm_head),
+            te::Element::Span(comm_head),
             te::Element::EditLine(comm_input_name),
             te::Element::EditLine(comm_tags),
             te::Element::EditBox(comm_input_notes),
@@ -131,31 +121,27 @@ where
         Ok(NewWorkspace {
             vp,
             elements,
-            refresh: Default::default(),
-            in_focus: Default::default(),
-            focus: TabOffsets::new(vec![2, 4, 5, 6, 0]),
+            focus: TabOffsets::new(vec![1, 3, 4, 5, 0]),
 
             _phantom_s: marker::PhantomData,
         })
     }
 
-    pub fn refresh(&mut self, _app: &mut Application<S>) -> Result<()> {
-        self.refresh += 1;
+    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
+        for em in self.elements.iter_mut() {
+            em.refresh(app)?
+        }
         Ok(())
     }
 
     pub fn focus(&mut self, app: &mut Application<S>) -> Result<()> {
         self.focus_element(app)?;
-        self.in_focus = true;
         Ok(())
     }
 
     pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
         let off = self.focus.current();
         self.elements[off as usize].leave(app)?;
-
-        self.in_focus = Default::default();
-        self.refresh = Default::default();
         Ok(())
     }
 
@@ -164,7 +150,7 @@ where
         let evnt = self.elements[off as usize].handle_event(app, evnt)?;
 
         match evnt {
-            Some(evnt) => match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+            Some(evnt) => match (evnt.to_modifiers(), evnt.to_key_code()) {
                 (modifiers, Some(code)) if modifiers.is_empty() => match code {
                     KeyCode::Esc => match self.focus.tab_to(0) {
                         Some(old_off) => {
@@ -236,12 +222,10 @@ where
         );
 
         let mut output: String = Default::default();
-        if self.refresh < 2 {
-            let s = String::from_iter(repeat(' ').take(width as usize));
-            for r in 0..height {
-                output.push_str(&cursor::MoveTo(col - 1, row + r).to_string());
-                output.push_str(&style::style(&s).on(te::BG_LAYER).to_string());
-            }
+        let s = String::from_iter(repeat(' ').take(width as usize));
+        for r in 0..height {
+            output.push_str(&cursor::MoveTo(col - 1, row + r).to_string());
+            output.push_str(&style::style(&s).on(te::BG_LAYER).to_string());
         }
         for element in self.elements.iter() {
             output.push_str(&element.to_string());

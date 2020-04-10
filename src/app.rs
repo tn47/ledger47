@@ -1,7 +1,7 @@
 use chrono;
 use crossterm::{
     cursor,
-    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, KeyCode},
     execute, queue,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -14,12 +14,11 @@ use std::{
 };
 
 use crate::{
-    pubsub::{self, PubSub},
+    event::{self, Event},
     term_elements as te,
     term_layers::{self as tl, Layer},
     Opt,
 };
-
 use ledger::{
     core::{Error, Result, Store},
     db_files, err_at, util,
@@ -94,7 +93,7 @@ where
 {
     dir: ffi::OsString,
     view: View<S>,
-    pubsub: PubSub,
+    listeners: Vec<event::Tx>,
     store: Option<S>,
     date: chrono::Date<chrono::Local>,
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
@@ -108,7 +107,7 @@ where
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
-            pubsub: PubSub::new("ledger47"),
+            listeners: Default::default(),
             store: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
@@ -135,7 +134,7 @@ where
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
-            pubsub: PubSub::new("ledger47"),
+            listeners: Default::default(),
             store: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
@@ -172,7 +171,7 @@ where
 
         loop {
             self.show_cursor()?;
-            let evnt = err_at!(Fatal, ct_event::read())?;
+            let evnt: Event = err_at!(Fatal, ct_event::read())?.into();
 
             trace!("Event-{:?}", evnt);
 
@@ -182,7 +181,7 @@ where
             };
 
             if let Some(evnt) = evnt {
-                match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
+                match (evnt.to_modifiers(), evnt.to_key_code()) {
                     (m, Some(KeyCode::Char('q'))) if m.is_empty() => break Ok(()),
                     (m, Some(KeyCode::Esc)) if m.is_empty() => {
                         if self.view.layers.len() > 1 {
@@ -193,7 +192,9 @@ where
                 };
             };
 
-            self.refresh()?.render()?;
+            execute!(self.view.tm.stdout, cursor::Hide);
+            self.refresh()?;
+            err_at!(Fatal, self.view.tm.stdout.flush())?;
         }
     }
 
@@ -290,18 +291,30 @@ where
         Ok(())
     }
 
-    pub fn subscribe(&mut self, topic: &str, tx: pubsub::Tx) {
-        self.pubsub.subscribe(topic, tx)
+    pub fn subscribe(&mut self, tx: event::Tx) {
+        self.listeners.push(tx)
     }
 
-    pub fn publish(&mut self, topic: &str, event: pubsub::Event) -> Result<()> {
-        self.pubsub.publish(topic, event)
+    pub fn publish(&mut self, evnt: Event) -> Result<()> {
+        let mut listeners = vec![];
+        for mut tx in self.listeners.drain(..) {
+            if let Ok(_) = tx.send(evnt.clone()) {
+                listeners.push(tx)
+            }
+        }
+        self.listeners = listeners;
+        Ok(())
     }
 
     #[inline]
     fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
         self.date = date;
         self.period = util::date_to_period(date);
+        {
+            self.publish(Event::Date(self.date.clone()));
+            let (from, to) = self.period.clone();
+            self.publish(Event::Period { from, to });
+        }
         self
     }
 
@@ -311,6 +324,10 @@ where
         period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
     ) -> &mut Self {
         self.period = period;
+        {
+            let (from, to) = self.period.clone();
+            self.publish(Event::Period { from, to });
+        }
         self
     }
 

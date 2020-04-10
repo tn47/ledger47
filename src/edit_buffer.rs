@@ -1,9 +1,10 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use crossterm::event::{KeyCode, KeyModifiers};
 use log::trace;
 use ropey::{iter::Lines, Rope};
 
 use std::{cmp, io};
 
+use crate::event::Event;
 use ledger::{
     core::{Error, Result},
     err_at,
@@ -65,11 +66,11 @@ enum InsertEvent {
 
 impl From<Event> for InsertEvent {
     fn from(evnt: Event) -> InsertEvent {
-        let m = to_modifiers(&evnt);
+        let m = evnt.to_modifiers();
         let ctrl = m.contains(KeyModifiers::CONTROL);
         // let shift = m.contains(KeyModifiers::SHIFT);
         match evnt {
-            Event::Key(KeyEvent { code, modifiers }) => match code {
+            Event::Key { code, modifiers } => match code {
                 KeyCode::Backspace if m.is_empty() => InsertEvent::Backspace,
                 KeyCode::Enter if m.is_empty() => InsertEvent::Enter,
                 KeyCode::Left if m.is_empty() => InsertEvent::Left,
@@ -86,12 +87,11 @@ impl From<Event> for InsertEvent {
                 KeyCode::F(f) if m.is_empty() => InsertEvent::F(f, modifiers),
                 KeyCode::Char('[') if ctrl => InsertEvent::Esc,
                 KeyCode::Char(ch) if m.is_empty() => InsertEvent::Char(ch, modifiers),
-                KeyCode::Esc if to_modifiers(&evnt).is_empty() => InsertEvent::Esc,
+                KeyCode::Esc if m.is_empty() => InsertEvent::Esc,
                 KeyCode::Insert | KeyCode::Null => InsertEvent::Noop,
                 _ => InsertEvent::Noop,
             },
-            Event::Mouse(_) => InsertEvent::Noop,
-            Event::Resize(_, _) => InsertEvent::Noop,
+            _ => InsertEvent::Noop,
         }
     }
 }
@@ -205,7 +205,7 @@ enum NormalEvent {
 impl From<Event> for NormalEvent {
     fn from(evnt: Event) -> NormalEvent {
         match evnt {
-            Event::Key(KeyEvent { code, modifiers }) => match code {
+            Event::Key { code, modifiers } => match code {
                 KeyCode::Backspace => NormalEvent::Backspace,
                 KeyCode::Enter => NormalEvent::Enter,
                 KeyCode::Left => NormalEvent::Left,
@@ -224,8 +224,7 @@ impl From<Event> for NormalEvent {
                 KeyCode::Insert | KeyCode::Null => NormalEvent::Noop,
                 KeyCode::Esc => NormalEvent::Esc,
             },
-            Event::Mouse(_) => NormalEvent::Noop,
-            Event::Resize(_, _) => NormalEvent::Noop,
+            _ => NormalEvent::Noop,
         }
     }
 }
@@ -260,7 +259,7 @@ enum ReplaceEvent {
 impl From<Event> for ReplaceEvent {
     fn from(evnt: Event) -> ReplaceEvent {
         match evnt {
-            Event::Key(KeyEvent { code, modifiers }) => match code {
+            Event::Key { code, modifiers } => match code {
                 KeyCode::Backspace => ReplaceEvent::Backspace,
                 KeyCode::Enter => ReplaceEvent::Enter,
                 KeyCode::Left => ReplaceEvent::Left,
@@ -279,8 +278,7 @@ impl From<Event> for ReplaceEvent {
                 KeyCode::Insert | KeyCode::Null => ReplaceEvent::Noop,
                 KeyCode::Esc => ReplaceEvent::Esc,
             },
-            Event::Mouse(_) => ReplaceEvent::Noop,
-            Event::Resize(_, _) => ReplaceEvent::Noop,
+            _ => ReplaceEvent::Noop,
         }
     }
 }
@@ -420,18 +418,6 @@ fn line_last_char(buf: &Rope, cursor: usize) -> usize {
     };
     trace!("line_last_char {} {} {}", start_idx, chars.len(), n);
     start_idx + chars.len() - n
-}
-
-fn to_modifiers(evnt: &Event) -> KeyModifiers {
-    match evnt {
-        Event::Resize(_, _) => KeyModifiers::empty(),
-        Event::Key(KeyEvent { modifiers, .. }) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Up(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Down(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Drag(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::ScrollDown(_, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::ScrollUp(_, _, modifiers)) => modifiers.clone(),
-    }
 }
 
 #[cfg(test)]

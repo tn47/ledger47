@@ -8,7 +8,6 @@ use std::fs;
 mod app;
 mod edit_buffer;
 mod event;
-mod pubsub;
 mod term_elements;
 mod term_layers;
 

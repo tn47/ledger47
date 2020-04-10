@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent},
+    event::KeyCode,
     queue,
     style::{self, Color},
     Command as TermCommand,
@@ -22,7 +22,7 @@ use std::{
 use crate::{
     app::Application,
     edit_buffer::{Buffer, EditRes},
-    pubsub,
+    event::{self, Event},
 };
 use ledger::{
     core::{Error, Result, Store},
@@ -61,22 +61,20 @@ macro_rules! element_method_dispatch {
     ($self:expr, $method:ident) => {
         match $self {
             Element::HeadLine(em) => em.$method(),
-            Element::Title(em) => em.$method(),
             Element::Border(em) => em.$method(),
             Element::EditLine(em) => em.$method(),
             Element::EditBox(em) => em.$method(),
-            Element::TextLine(em) => em.$method(),
+            Element::Span(em) => em.$method(),
             Element::StatusLine(em) => em.$method(),
         }
     };
     ($self:expr, $method:ident, $($e:expr),*) => {
         match $self {
             Element::HeadLine(em) => em.$method($($e),*),
-            Element::Title(em) => em.$method($($e),*),
             Element::Border(em) => em.$method($($e),*),
             Element::EditLine(em) => em.$method($($e),*),
             Element::EditBox(em) => em.$method($($e),*),
-            Element::TextLine(em) => em.$method($($e),*),
+            Element::Span(em) => em.$method($($e),*),
             Element::StatusLine(em) => em.$method($($e),*),
         }
     };
@@ -84,9 +82,8 @@ macro_rules! element_method_dispatch {
 
 pub enum Element {
     HeadLine(HeadLine),
-    Title(Title),
     Border(Border),
-    TextLine(TextLine),
+    Span(Span),
     EditLine(EditLine),
     EditBox(EditBox),
     StatusLine(StatusLine),
@@ -100,11 +97,10 @@ impl Element {
     pub fn contain_cell(&self, col: u16, row: u16) -> bool {
         match self {
             Element::HeadLine(em) => em.vp.contain_cell(col, row),
-            Element::Title(em) => em.vp.contain_cell(col, row),
             Element::Border(em) => em.vp.contain_cell(col, row),
             Element::EditLine(em) => em.vp.contain_cell(col, row),
             Element::EditBox(em) => em.vp.contain_cell(col, row),
-            Element::TextLine(em) => em.vp.contain_cell(col, row),
+            Element::Span(em) => em.vp.contain_cell(col, row),
             Element::StatusLine(em) => em.vp.contain_cell(col, row),
         }
     }
@@ -315,12 +311,12 @@ pub struct HeadLine {
     date: chrono::Date<chrono::Local>,
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 
-    rx: mpsc::Receiver<pubsub::Event>,
+    rx: mpsc::Receiver<Event>,
 }
 
 impl Default for HeadLine {
     fn default() -> Self {
-        let (_tx, rx) = pubsub::Tx::new();
+        let (_tx, rx) = event::Tx::new();
         HeadLine {
             vp: Default::default(),
             date: chrono::Local::now().date(),
@@ -341,8 +337,8 @@ impl HeadLine {
         let date = app.to_local_date();
         let period = app.to_local_period();
 
-        let (tx, rx) = pubsub::Tx::new();
-        app.subscribe("/headline", tx);
+        let (tx, rx) = event::Tx::new();
+        app.subscribe(tx);
 
         Ok(HeadLine {
             vp,
@@ -359,11 +355,11 @@ impl HeadLine {
     {
         let refresh = loop {
             match self.rx.try_recv() {
-                Ok(pubsub::Event::Date(date)) => {
+                Ok(Event::Date(date)) => {
                     self.date = date;
                     break Ok(true);
                 }
-                Ok(pubsub::Event::Period(from, to)) => {
+                Ok(Event::Period { from, to }) => {
                     self.period = (from, to);
                     break Ok(true);
                 }
@@ -450,107 +446,29 @@ impl fmt::Display for HeadLine {
 }
 
 #[derive(Clone)]
-pub struct Title {
-    vp: Viewport,
-    content: String,
-
-    tc: String,
-}
-
-impl_command!(Title);
-
-impl Title {
-    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, content: &str) -> Result<Title>
-    where
-        S: Store,
-    {
-        let content = " ".to_string() + content + " ";
-        let mut em = Title {
-            vp,
-            content,
-            tc: Default::default(),
-        };
-
-        let (col, row) = em.vp.to_origin();
-        em.tc
-            .push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
-        em.tc.push_str(
-            &style::style(em.content.clone())
-                .on(BG_LAYER)
-                .with(FG_TITLE)
-                .to_string(),
-        );
-
-        Ok(em)
-    }
-
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
-    where
-        S: Store,
-    {
-        Ok(())
-    }
-
-    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
-    where
-        S: Store,
-    {
-        trace!("Focus title");
-        Ok(())
-    }
-
-    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
-    where
-        S: Store,
-    {
-        Ok(())
-    }
-
-    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
-    where
-        S: Store,
-    {
-        Ok(Some(evnt))
-    }
-}
-
-impl fmt::Display for Title {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        let (col, row) = self.vp.to_origin();
-        let (height, width) = self.vp.to_size();
-
-        trace!(
-            "Title::Viewport col:{} row:{} height:{} width:{}",
-            col,
-            row,
-            height,
-            width
-        );
-
-        write!(f, "{}", self.tc)
-    }
-}
-
-#[derive(Clone)]
 pub struct Border {
     vp: Viewport,
-    focus: &'static str,
+    title: String,
+    focus: bool,
     tc_normal: String,
     tc_highlt: String,
+    render_type: &'static str,
 }
 
 impl_command!(Border);
 
 impl Border {
-    pub fn new<S>(_app: &mut Application<S>, vp: Viewport) -> Result<Border>
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, title: String) -> Result<Border>
     where
         S: Store,
     {
         let mut em = Border {
             vp,
-            focus: "leave",
+            title: " ".to_string() + title.as_str() + " ",
+            focus: false,
             tc_normal: Default::default(),
             tc_highlt: Default::default(),
+            render_type: "normal",
         };
 
         em.tc_normal
@@ -568,10 +486,19 @@ impl Border {
         Ok(em)
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        trace!("border  refresh");
+        if self.focus && self.render_type == "normal" {
+            self.render_type = "highlt";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        } else if !self.focus && self.render_type == "highlt" {
+            self.render_type = "normal";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
         Ok(())
     }
 
@@ -580,7 +507,7 @@ impl Border {
         S: Store,
     {
         trace!("Focus border");
-        self.focus = "focus";
+        self.focus = true;
 
         Ok(())
     }
@@ -589,7 +516,7 @@ impl Border {
     where
         S: Store,
     {
-        self.focus = "leave";
+        self.focus = false;
 
         Ok(())
     }
@@ -657,34 +584,44 @@ impl fmt::Display for Border {
             wd
         );
 
-        match self.focus {
-            "focus" => write!(f, "{}", self.tc_highlt),
-            "leave" => write!(f, "{}", self.tc_normal),
-            _ => panic!("unreachable"),
+        match self.render_type {
+            "normal" => write!(f, "{}", self.tc_normal)?,
+            "highlt" => write!(f, "{}", self.tc_highlt)?,
+            _ => unreachable!(),
         }
+
+        // render title
+        let (col, _) = self.vp.to_origin();
+        let col = col + 2;
+
+        let mut span: String = Default::default();
+        span.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        span.push_str(
+            &style::style(self.title.clone())
+                .on(BG_LAYER)
+                .with(FG_TITLE)
+                .to_string(),
+        );
+
+        write!(f, "{}", span)
     }
 }
 
 #[derive(Clone)]
-pub struct TextLine {
+pub struct Span {
     vp: Viewport,
     content: String,
     fg: Color,
 }
 
-impl_command!(TextLine);
+impl_command!(Span);
 
-impl TextLine {
-    pub fn new<S>(
-        _app: &mut Application<S>,
-        vp: Viewport,
-        content: &str,
-        fg: Color,
-    ) -> Result<TextLine>
+impl Span {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, content: &str, fg: Color) -> Result<Span>
     where
         S: Store,
     {
-        Ok(TextLine {
+        Ok(Span {
             vp,
             content: content.to_string(),
             fg,
@@ -721,13 +658,13 @@ impl TextLine {
     }
 }
 
-impl fmt::Display for TextLine {
+impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         let (col, row) = self.vp.to_origin();
         let (height, width) = self.vp.to_size();
 
         trace!(
-            "TextLine::Viewport col:{} row:{} height:{} width:{}",
+            "Span::Viewport col:{} row:{} height:{} width:{}",
             col,
             row,
             height,
@@ -839,6 +776,7 @@ pub struct EditLine {
     vp: Viewport,
     inline: String,
     buffer: Buffer,
+    focus: bool,
 }
 
 impl_command!(EditLine);
@@ -850,6 +788,7 @@ impl EditLine {
     {
         Ok(EditLine {
             vp,
+            focus: false,
             inline: inline.to_string(),
             buffer: Buffer::empty()?.change_to_insert(),
         })
@@ -860,10 +799,14 @@ impl EditLine {
         Ok(())
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        if self.focus {
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
         Ok(())
     }
 
@@ -877,13 +820,17 @@ impl EditLine {
             self.vp.to_origin(),
             self.vp.to_cursor_off()
         );
-        app.move_cursor(col, row)
+        app.move_cursor(col, row)?;
+        self.focus = true;
+
+        Ok(())
     }
 
     fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        self.focus = false;
         Ok(())
     }
 
@@ -891,7 +838,7 @@ impl EditLine {
     where
         S: Store,
     {
-        let evnt = match (to_modifiers(&evnt), to_key_code(&evnt)) {
+        let evnt = match (evnt.to_modifiers(), evnt.to_key_code()) {
             (_, Some(KeyCode::Enter))
             | (_, Some(KeyCode::Esc))
             | (_, Some(KeyCode::Up))
@@ -983,6 +930,7 @@ pub struct EditBox {
     vp: Viewport,
     inline: String,
     buffer: Buffer,
+    focus: bool,
 }
 
 impl_command!(EditBox);
@@ -996,6 +944,7 @@ impl EditBox {
             vp,
             inline: inline.to_string(),
             buffer: Buffer::empty()?.change_to_insert(),
+            focus: false,
         })
     }
 
@@ -1004,10 +953,14 @@ impl EditBox {
         Ok(())
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        if self.focus {
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
         Ok(())
     }
 
@@ -1021,13 +974,16 @@ impl EditBox {
             self.vp.to_origin(),
             self.vp.to_cursor_off()
         );
-        app.move_cursor(col, row)
+        app.move_cursor(col, row)?;
+        self.focus = true;
+        Ok(())
     }
 
     fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        self.focus = false;
         Ok(())
     }
 
@@ -1035,7 +991,7 @@ impl EditBox {
     where
         S: Store,
     {
-        let evnt = match (to_modifiers(&evnt), to_key_code(&evnt)) {
+        let evnt = match (evnt.to_modifiers(), evnt.to_key_code()) {
             (m, Some(KeyCode::BackTab)) if m.is_empty() => Ok(Some(evnt)),
             _ => match self.buffer.handle_event(evnt)? {
                 EditRes {
@@ -1114,25 +1070,5 @@ impl fmt::Display for EditBox {
         }
 
         Ok(())
-    }
-}
-
-pub fn to_modifiers(evnt: &Event) -> KeyModifiers {
-    match evnt {
-        Event::Resize(_, _) => KeyModifiers::empty(),
-        Event::Key(KeyEvent { modifiers, .. }) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Up(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Down(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::Drag(_, _, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::ScrollDown(_, _, modifiers)) => modifiers.clone(),
-        Event::Mouse(MouseEvent::ScrollUp(_, _, modifiers)) => modifiers.clone(),
-    }
-}
-
-pub fn to_key_code(evnt: &Event) -> Option<KeyCode> {
-    match evnt {
-        Event::Resize(_, _) => None,
-        Event::Key(KeyEvent { code, .. }) => Some(code.clone()),
-        Event::Mouse(_) => None,
     }
 }

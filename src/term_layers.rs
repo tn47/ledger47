@@ -78,46 +78,44 @@ impl<S> NewWorkspace<S>
 where
     S: Store,
 {
-    const DEFAULT_FOCUS: usize = 2;
-
     pub fn new(app: &mut Application<S>) -> Result<NewWorkspace<S>> {
         let vp = app.to_viewport();
 
-        let border = te::Border::new(vp.clone()).ok().unwrap();
+        let border = te::Border::new(app, vp.clone()).ok().unwrap();
         let title = {
             let content = "Create new workspace".to_string();
             let title_vp = vp
                 .clone()
                 .move_by(2, 0)
                 .resize_to(1, (content.width() as u16) + 2);
-            te::Title::new(title_vp, &content).ok().unwrap()
+            te::Title::new(app, title_vp, &content).ok().unwrap()
         };
         let ws_input_name = {
             let inline = "Enter workspace name, only alphanumeric and '_'";
             let input_vp = vp.clone().move_by(5, 3).resize_to(1, 40);
-            te::EditLine::new(input_vp, inline).ok().unwrap()
+            te::EditLine::new(app, input_vp, inline).ok().unwrap()
         };
         let comm_head = {
             let content = "Enter default commodity details";
             let comm_vp = vp.clone().move_by(5, 5).resize_to(1, 60);
-            te::TextLine::new(comm_vp, content, te::FG_SECTION)
+            te::TextLine::new(app, comm_vp, content, te::FG_SECTION)
                 .ok()
                 .unwrap()
         };
         let comm_input_name = {
             let inline = "Name of the commodity, only alphanumeric";
             let comm_vp = vp.clone().move_by(8, 7).resize_to(1, 60);
-            te::EditLine::new(comm_vp, inline).ok().unwrap()
+            te::EditLine::new(app, comm_vp, inline).ok().unwrap()
         };
         let comm_tags = {
             let inline = "List of tags, EG: money.asia,exchange.westernunion";
             let comm_vp = vp.clone().move_by(8, 9).resize_to(1, 60);
-            te::EditLine::new(comm_vp, inline).ok().unwrap()
+            te::EditLine::new(app, comm_vp, inline).ok().unwrap()
         };
         let comm_input_notes = {
             let inline = "Any notes for user consumption";
             let comm_vp = vp.clone().move_by(8, 11).resize_to(10, 60);
-            te::EditBox::new(comm_vp, inline).ok().unwrap()
+            te::EditBox::new(app, comm_vp, inline).ok().unwrap()
         };
 
         let elements = vec![
@@ -154,9 +152,7 @@ where
 
     pub fn leave(&mut self, app: &mut Application<S>) -> Result<()> {
         let off = self.focus.current();
-        if off >= 0 {
-            self.elements[off as usize].leave(app)?;
-        }
+        self.elements[off as usize].leave(app)?;
 
         self.in_focus = Default::default();
         self.refresh = Default::default();
@@ -165,18 +161,14 @@ where
 
     pub fn handle_event(&mut self, app: &mut Application<S>, evnt: Event) -> Result<Option<Event>> {
         let off = self.focus.current();
-        let evnt = if off >= 0 {
-            self.elements[off as usize].handle_event(app, evnt)?
-        } else {
-            Some(evnt)
-        };
+        let evnt = self.elements[off as usize].handle_event(app, evnt)?;
 
         match evnt {
             Some(evnt) => match (te::to_modifiers(&evnt), te::to_key_code(&evnt)) {
                 (modifiers, Some(code)) if modifiers.is_empty() => match code {
                     KeyCode::Esc => match self.focus.tab_to(0) {
                         Some(old_off) => {
-                            self.elements[old_off].leave(app);
+                            self.elements[old_off].leave(app)?;
                             self.focus_element(app)?;
                             app.hide_cursor()?;
                             Ok(None)
@@ -185,13 +177,13 @@ where
                     },
                     KeyCode::Enter | KeyCode::Tab => {
                         let old_off = self.focus.tab();
-                        self.elements[old_off].leave(app);
+                        self.elements[old_off].leave(app)?;
                         self.focus_element(app)?;
                         Ok(None)
                     }
                     KeyCode::BackTab => {
                         let old_off = self.focus.back_tab();
-                        self.elements[old_off].leave(app);
+                        self.elements[old_off].leave(app)?;
                         self.focus_element(app)?;
                         Ok(None)
                     }

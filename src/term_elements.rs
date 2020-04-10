@@ -1,6 +1,7 @@
 use crossterm::{
     cursor,
     event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent},
+    queue,
     style::{self, Color},
     Command as TermCommand,
 };
@@ -11,18 +12,21 @@ use std::{
     cmp,
     convert::TryInto,
     fmt,
+    io::Write,
     iter::FromIterator,
     ops::{self, RangeBounds},
     result,
+    sync::mpsc,
 };
 
 use crate::{
     app::Application,
     edit_buffer::{Buffer, EditRes},
+    pubsub,
 };
 use ledger::{
-    core::{Result, Store},
-    util,
+    core::{Error, Result, Store},
+    err_at, util,
 };
 
 pub const MIN_COL: u64 = 1;
@@ -53,6 +57,31 @@ macro_rules! impl_command {
     };
 }
 
+macro_rules! element_method_dispatch {
+    ($self:expr, $method:ident) => {
+        match $self {
+            Element::HeadLine(em) => em.$method(),
+            Element::Title(em) => em.$method(),
+            Element::Border(em) => em.$method(),
+            Element::EditLine(em) => em.$method(),
+            Element::EditBox(em) => em.$method(),
+            Element::TextLine(em) => em.$method(),
+            Element::StatusLine(em) => em.$method(),
+        }
+    };
+    ($self:expr, $method:ident, $($e:expr),*) => {
+        match $self {
+            Element::HeadLine(em) => em.$method($($e),*),
+            Element::Title(em) => em.$method($($e),*),
+            Element::Border(em) => em.$method($($e),*),
+            Element::EditLine(em) => em.$method($($e),*),
+            Element::EditBox(em) => em.$method($($e),*),
+            Element::TextLine(em) => em.$method($($e),*),
+            Element::StatusLine(em) => em.$method($($e),*),
+        }
+    };
+}
+
 pub enum Element {
     HeadLine(HeadLine),
     Title(Title),
@@ -65,15 +94,7 @@ pub enum Element {
 
 impl Element {
     pub fn to_string(&self) -> String {
-        match self {
-            Element::HeadLine(em) => em.to_string(),
-            Element::Title(em) => em.to_string(),
-            Element::Border(em) => em.to_string(),
-            Element::EditLine(em) => em.to_string(),
-            Element::EditBox(em) => em.to_string(),
-            Element::TextLine(em) => em.to_string(),
-            Element::StatusLine(em) => em.to_string(),
-        }
+        element_method_dispatch!(self, to_string)
     }
 
     pub fn contain_cell(&self, col: u16, row: u16) -> bool {
@@ -92,45 +113,21 @@ impl Element {
     where
         S: Store,
     {
-        match self {
-            Element::HeadLine(em) => em.refresh(app),
-            Element::Title(em) => em.refresh(app),
-            Element::Border(em) => em.refresh(app),
-            Element::EditLine(em) => em.refresh(app),
-            Element::EditBox(em) => em.refresh(app),
-            Element::TextLine(em) => em.refresh(app),
-            Element::StatusLine(em) => em.refresh(app),
-        }
+        element_method_dispatch!(self, refresh, app)
     }
 
     pub fn focus<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
-        match self {
-            Element::HeadLine(em) => em.focus(app),
-            Element::Title(em) => em.focus(app),
-            Element::Border(em) => em.focus(app),
-            Element::EditLine(em) => em.focus(app),
-            Element::EditBox(em) => em.focus(app),
-            Element::TextLine(em) => em.focus(app),
-            Element::StatusLine(em) => em.focus(app),
-        }
+        element_method_dispatch!(self, focus, app)
     }
 
     pub fn leave<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
-        match self {
-            Element::HeadLine(em) => em.leave(app),
-            Element::Title(em) => em.leave(app),
-            Element::Border(em) => em.leave(app),
-            Element::EditLine(em) => em.leave(app),
-            Element::EditBox(em) => em.leave(app),
-            Element::TextLine(em) => em.leave(app),
-            Element::StatusLine(em) => em.leave(app),
-        }
+        element_method_dispatch!(self, leave, app)
     }
 
     pub fn handle_event<S>(
@@ -141,15 +138,7 @@ impl Element {
     where
         S: Store,
     {
-        match self {
-            Element::HeadLine(em) => em.handle_event(app, evnt),
-            Element::Title(em) => em.handle_event(app, evnt),
-            Element::Border(em) => em.handle_event(app, evnt),
-            Element::EditLine(em) => em.handle_event(app, evnt),
-            Element::EditBox(em) => em.handle_event(app, evnt),
-            Element::TextLine(em) => em.handle_event(app, evnt),
-            Element::StatusLine(em) => em.handle_event(app, evnt),
-        }
+        element_method_dispatch!(self, handle_event, app, evnt)
     }
 }
 
@@ -321,19 +310,23 @@ impl Viewport {
     }
 }
 
-#[derive(Clone)]
 pub struct HeadLine {
     vp: Viewport,
     date: chrono::Date<chrono::Local>,
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
+
+    rx: mpsc::Receiver<pubsub::Event>,
 }
 
 impl Default for HeadLine {
     fn default() -> Self {
+        let (_tx, rx) = pubsub::Tx::new();
         HeadLine {
             vp: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
+
+            rx,
         }
     }
 }
@@ -341,20 +334,51 @@ impl Default for HeadLine {
 impl_command!(HeadLine);
 
 impl HeadLine {
-    pub fn new<S>(vp: Viewport, app: &Application<S>) -> Result<HeadLine>
+    pub fn new<S>(app: &mut Application<S>, vp: Viewport) -> Result<HeadLine>
     where
         S: Store,
     {
         let date = app.to_local_date();
         let period = app.to_local_period();
 
-        Ok(HeadLine { vp, date, period })
+        let (tx, rx) = pubsub::Tx::new();
+        app.subscribe("/headline", tx);
+
+        Ok(HeadLine {
+            vp,
+            date,
+            period,
+
+            rx,
+        })
     }
 
-    pub fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
     where
         S: Store,
     {
+        let refresh = loop {
+            match self.rx.try_recv() {
+                Ok(pubsub::Event::Date(date)) => {
+                    self.date = date;
+                    break Ok(true);
+                }
+                Ok(pubsub::Event::Period(from, to)) => {
+                    self.period = (from, to);
+                    break Ok(true);
+                }
+                Ok(_) => break Ok(false),
+                Err(mpsc::TryRecvError::Empty) => break Ok(false),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    break err_at!(IOError, msg: format!("refresh"))
+                }
+            }
+        }?;
+
+        if refresh {
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
         Ok(())
     }
 
@@ -396,6 +420,8 @@ impl fmt::Display for HeadLine {
             width
         );
 
+        let mut s: String = Default::default();
+
         let s_date = self.date.format("%d-%b-%y").to_string();
         let ss_date = style::style(&s_date).on(BG_LAYER).with(FG_DATE);
         let s_per0 = self.period.0.format("%d-%b-%y").to_string();
@@ -403,13 +429,13 @@ impl fmt::Display for HeadLine {
         let s_per1 = self.period.1.format("%d-%b-%y").to_string();
         let ss_per1 = style::style(&s_per1).on(BG_LAYER).with(FG_PERIOD);
 
-        let mut line = {
+        s.push_str(&{
             let n = (width as usize) - s_per0.len() - s_per1.len() - s_date.len() - 3;
             style::style(&String::from_iter(repeat(' ').take(n)))
                 .on(BG_LAYER)
                 .to_string()
-        };
-        line.push_str(&format!(
+        });
+        s.push_str(&format!(
             "{}{}{}{}{}",
             ss_per0,
             style::style("..").on(BG_LAYER).with(FG_BORDER),
@@ -419,7 +445,7 @@ impl fmt::Display for HeadLine {
         ));
 
         write!(f, "{}", cursor::MoveTo(col - 1, row - 1).to_string())?;
-        write!(f, "{}", line)
+        write!(f, "{}", s)
     }
 }
 
@@ -427,24 +453,28 @@ impl fmt::Display for HeadLine {
 pub struct Title {
     vp: Viewport,
     content: String,
-    term_cache: String,
+
+    tc: String,
 }
 
 impl_command!(Title);
 
 impl Title {
-    pub fn new(vp: Viewport, content: &str) -> Result<Title> {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, content: &str) -> Result<Title>
+    where
+        S: Store,
+    {
         let content = " ".to_string() + content + " ";
         let mut em = Title {
             vp,
             content,
-            term_cache: Default::default(),
+            tc: Default::default(),
         };
 
         let (col, row) = em.vp.to_origin();
-        em.term_cache
+        em.tc
             .push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
-        em.term_cache.push_str(
+        em.tc.push_str(
             &style::style(em.content.clone())
                 .on(BG_LAYER)
                 .with(FG_TITLE)
@@ -497,7 +527,7 @@ impl fmt::Display for Title {
             width
         );
 
-        write!(f, "{}", self.term_cache)
+        write!(f, "{}", self.tc)
     }
 }
 
@@ -512,7 +542,10 @@ pub struct Border {
 impl_command!(Border);
 
 impl Border {
-    pub fn new(vp: Viewport) -> Result<Border> {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport) -> Result<Border>
+    where
+        S: Store,
+    {
         let mut em = Border {
             vp,
             focus: "leave",
@@ -520,23 +553,17 @@ impl Border {
             tc_highlt: Default::default(),
         };
 
-        let (col, row) = {
-            let (col, row) = em.vp.to_origin();
-            (col - 1, row - 1)
-        };
-        let (ht, wd) = em.vp.to_size();
-
         em.tc_normal
             .push_str(&style::SetBackgroundColor(BG_LAYER).to_string());
         em.tc_normal
             .push_str(&style::SetForegroundColor(FG_BORDER).to_string());
-        Self::make_term_cache(&mut em.tc_normal, col, row, ht, wd);
+        em.tc_normal.push_str(&em.make_term_cache());
 
         em.tc_highlt
             .push_str(&style::SetBackgroundColor(BG_LAYER).to_string());
         em.tc_highlt
             .push_str(&style::SetForegroundColor(FG_BORDER_HL).to_string());
-        Self::make_term_cache(&mut em.tc_highlt, col, row, ht, wd);
+        em.tc_highlt.push_str(&em.make_term_cache());
 
         Ok(em)
     }
@@ -574,8 +601,15 @@ impl Border {
         Ok(Some(evnt))
     }
 
-    fn make_term_cache(s: &mut String, col: u16, row: u16, ht: u16, wd: u16) {
+    fn make_term_cache(&self) -> String {
         use std::iter::repeat;
+
+        let (col, row) = {
+            let (col, row) = self.vp.to_origin();
+            (col - 1, row - 1)
+        };
+        let (ht, wd) = self.vp.to_size();
+        let mut s: String = Default::default();
 
         // top
         s.push_str(&cursor::MoveTo(col, row).to_string());
@@ -605,6 +639,8 @@ impl Border {
         // bottom-left corner
         s.push_str(&cursor::MoveTo(col, row + ht - 1).to_string());
         s.push_str("╰");
+
+        s
     }
 }
 
@@ -639,7 +675,15 @@ pub struct TextLine {
 impl_command!(TextLine);
 
 impl TextLine {
-    pub fn new(vp: Viewport, content: &str, fg: Color) -> Result<TextLine> {
+    pub fn new<S>(
+        _app: &mut Application<S>,
+        vp: Viewport,
+        content: &str,
+        fg: Color,
+    ) -> Result<TextLine>
+    where
+        S: Store,
+    {
         Ok(TextLine {
             vp,
             content: content.to_string(),
@@ -710,7 +754,10 @@ pub struct StatusLine {
 impl_command!(StatusLine);
 
 impl StatusLine {
-    pub fn new(vp: Viewport) -> Result<StatusLine> {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport) -> Result<StatusLine>
+    where
+        S: Store,
+    {
         use std::iter::repeat;
 
         let line = {
@@ -797,7 +844,10 @@ pub struct EditLine {
 impl_command!(EditLine);
 
 impl EditLine {
-    pub fn new(vp: Viewport, inline: &str) -> Result<EditLine> {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, inline: &str) -> Result<EditLine>
+    where
+        S: Store,
+    {
         Ok(EditLine {
             vp,
             inline: inline.to_string(),
@@ -938,7 +988,10 @@ pub struct EditBox {
 impl_command!(EditBox);
 
 impl EditBox {
-    pub fn new(vp: Viewport, inline: &str) -> Result<EditBox> {
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, inline: &str) -> Result<EditBox>
+    where
+        S: Store,
+    {
         Ok(EditBox {
             vp,
             inline: inline.to_string(),

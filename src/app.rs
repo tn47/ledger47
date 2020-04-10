@@ -13,9 +13,12 @@ use std::{
     mem,
 };
 
-use crate::term_elements as te;
-use crate::term_layers::{self as tl, Layer};
-use crate::Opt;
+use crate::{
+    pubsub::{self, PubSub},
+    term_elements as te,
+    term_layers::{self as tl, Layer},
+    Opt,
+};
 
 use ledger::{
     core::{Error, Result, Store},
@@ -43,7 +46,7 @@ enum ViewFocus {
     Cmd,
 }
 
-pub struct View<S>
+struct View<S>
 where
     S: Store,
 {
@@ -61,7 +64,7 @@ impl<S> View<S>
 where
     S: Store,
 {
-    pub fn new() -> Result<View<S>> {
+    fn new() -> Result<View<S>> {
         let tm = err_at!(Fatal, Terminal::init())?;
         // adjust full screen for a head-line in top and status-line at bottom.
         let vp = te::Viewport::new(1, 2, tm.rows - 2, tm.cols);
@@ -80,7 +83,7 @@ where
     }
 
     #[inline]
-    pub fn to_viewport(&self) -> te::Viewport {
+    fn to_viewport(&self) -> te::Viewport {
         self.vp.clone()
     }
 }
@@ -91,6 +94,7 @@ where
 {
     dir: ffi::OsString,
     view: View<S>,
+    pubsub: PubSub,
     store: Option<S>,
     date: chrono::Date<chrono::Local>,
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
@@ -104,6 +108,7 @@ where
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
+            pubsub: PubSub::new("ledger47"),
             store: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
@@ -111,11 +116,11 @@ where
 
         app.view.head = {
             let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
-            te::HeadLine::new(vp, &mut app)?
+            te::HeadLine::new(&mut app, vp)?
         };
         app.view.status = {
             let vp = te::Viewport::new(1, app.view.tm.rows, 1, app.view.tm.cols);
-            te::StatusLine::new(vp)?
+            te::StatusLine::new(&mut app, vp)?
         };
 
         let layer = tl::NewWorkspace::new(&mut app)?;
@@ -130,6 +135,7 @@ where
         let mut app = Application {
             dir: dir.clone(),
             view: View::new()?,
+            pubsub: PubSub::new("ledger47"),
             store: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
@@ -137,11 +143,11 @@ where
 
         app.view.head = {
             let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
-            te::HeadLine::new(vp, &mut app)?
+            te::HeadLine::new(&mut app, vp)?
         };
         app.view.status = {
             let vp = te::Viewport::new(1, app.view.tm.rows, 1, app.view.tm.cols);
-            te::StatusLine::new(vp)?
+            te::StatusLine::new(&mut app, vp)?
         };
 
         let layer = tl::NewWorkspace::new(&mut app)?;
@@ -256,6 +262,11 @@ where
     }
 
     #[inline]
+    pub fn as_mut_stdout(&mut self) -> &mut io::Stdout {
+        &mut self.view.tm.stdout
+    }
+
+    #[inline]
     pub fn to_local_date(&self) -> chrono::Date<chrono::Local> {
         self.date.clone()
     }
@@ -263,50 +274,6 @@ where
     #[inline]
     pub fn to_local_period(&self) -> (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>) {
         self.period.clone()
-    }
-
-    #[inline]
-    pub fn as_mut_status(&mut self) -> &mut te::StatusLine {
-        &mut self.view.status
-    }
-
-    #[inline]
-    pub fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
-        self.date = date;
-        self.period = util::date_to_period(date);
-        self
-    }
-
-    #[inline]
-    pub fn send_status(&mut self, msg: &str) -> &mut Self {
-        self.view.status.log(msg);
-        self
-    }
-
-    #[inline]
-    pub fn set_period(
-        &mut self,
-        period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
-    ) -> &mut Self {
-        self.period = period;
-        self
-    }
-
-    pub fn show_cursor(&mut self) -> Result<()> {
-        match self.view.cursor {
-            Some((col, row)) => err_at!(
-                Fatal,
-                execute!(
-                    self.view.tm.stdout,
-                    cursor::MoveTo(col - 1, row - 1),
-                    cursor::EnableBlinking,
-                    cursor::Show,
-                )
-            )?,
-            None => err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide,))?,
-        }
-
-        Ok(())
     }
 
     pub fn hide_cursor(&mut self) -> Result<()> {
@@ -322,12 +289,53 @@ where
 
         Ok(())
     }
+
+    pub fn subscribe(&mut self, topic: &str, tx: pubsub::Tx) {
+        self.pubsub.subscribe(topic, tx)
+    }
+
+    pub fn publish(&mut self, topic: &str, event: pubsub::Event) -> Result<()> {
+        self.pubsub.publish(topic, event)
+    }
+
+    #[inline]
+    fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
+        self.date = date;
+        self.period = util::date_to_period(date);
+        self
+    }
+
+    #[inline]
+    fn set_period(
+        &mut self,
+        period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
+    ) -> &mut Self {
+        self.period = period;
+        self
+    }
+
+    fn show_cursor(&mut self) -> Result<()> {
+        match self.view.cursor {
+            Some((col, row)) => err_at!(
+                Fatal,
+                execute!(
+                    self.view.tm.stdout,
+                    cursor::MoveTo(col - 1, row - 1),
+                    cursor::EnableBlinking,
+                    cursor::Show,
+                )
+            )?,
+            None => err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide,))?,
+        }
+
+        Ok(())
+    }
 }
 
-pub struct Terminal {
-    pub(crate) stdout: io::Stdout,
-    pub(crate) cols: u16,
-    pub(crate) rows: u16,
+struct Terminal {
+    stdout: io::Stdout,
+    cols: u16,
+    rows: u16,
 }
 
 impl Terminal {

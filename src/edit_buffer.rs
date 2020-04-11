@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::trace;
 use ropey::{iter::Lines, Rope};
+use unicode_width::UnicodeWidthChar;
 
 use std::{cmp, io};
 
@@ -17,7 +18,21 @@ macro_rules! update_cursor {
         let (col_at, row_at) = {
             let row_at = $buf.char_to_line($new_cursor);
             let col_at = $new_cursor - $buf.line_to_char(row_at);
-            (col_at, row_at)
+            match $buf.lines_at(row_at).next() {
+                Some(line) => {
+                    let a_col_at: usize = line
+                        .to_string()
+                        .chars()
+                        .take(col_at)
+                        .map(|ch| match ch {
+                            '\t' => 4,
+                            ch => ch.width().unwrap(),
+                        })
+                        .sum();
+                    (a_col_at, row_at)
+                }
+                None => (col_at, row_at),
+            }
         };
 
         $cursor = $new_cursor;
@@ -314,6 +329,26 @@ pub enum Buffer {
     Replace { buf: Rope, cursor: usize }, // cursor is char_idx into buffer.
 }
 
+impl AsRef<Rope> for Buffer {
+    fn as_ref(&self) -> &Rope {
+        match self {
+            Buffer::Normal { buf, .. } => buf,
+            Buffer::Insert { buf, .. } => buf,
+            Buffer::Replace { buf, .. } => buf,
+        }
+    }
+}
+
+impl AsMut<Rope> for Buffer {
+    fn as_mut(&mut self) -> &mut Rope {
+        match self {
+            Buffer::Normal { buf, .. } => buf,
+            Buffer::Insert { buf, .. } => buf,
+            Buffer::Replace { buf, .. } => buf,
+        }
+    }
+}
+
 impl Default for Buffer {
     fn default() -> Buffer {
         let bytes: Vec<u8> = vec![];
@@ -367,21 +402,14 @@ impl Buffer {
     }
 
     pub fn to_string(&self) -> String {
-        match self {
-            Buffer::Normal { buf, .. } => buf,
-            Buffer::Insert { buf, .. } => buf,
-            Buffer::Replace { buf, .. } => buf,
-        }
-        .to_string()
+        self.as_ref().to_string()
     }
 
-    pub fn lines_at(&self, from: usize) -> Lines {
-        let buf = match self {
-            Buffer::Normal { buf, .. } => buf,
-            Buffer::Insert { buf, .. } => buf,
-            Buffer::Replace { buf, .. } => buf,
-        };
-        buf.lines_at(from)
+    pub fn view_lines(&self, from: usize) -> Vec<String> {
+        self.as_ref()
+            .lines_at(from)
+            .map(|s| s.to_string().replace('\t', "    "))
+            .collect()
     }
 }
 

@@ -34,6 +34,8 @@ pub const MIN_ROW: u64 = 1;
 
 pub const BG_LAYER: Color = Color::AnsiValue(235);
 pub const BG_EDIT: Color = Color::AnsiValue(232);
+pub const BG_BUTTON: Color = Color::AnsiValue(232);
+pub const BG_BUTTON_HL: Color = Color::AnsiValue(232);
 
 pub const FG_PERIOD: Color = Color::AnsiValue(27);
 pub const FG_DATE: Color = Color::AnsiValue(33);
@@ -44,6 +46,8 @@ pub const FG_EDIT_INLINE: Color = Color::AnsiValue(59);
 pub const FG_EDIT: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
 pub const FG_STATUS: Color = Color::AnsiValue(15);
+pub const FG_BUTTON: Color = Color::AnsiValue(232);
+pub const FG_BUTTON_HL: Color = Color::AnsiValue(232);
 
 macro_rules! impl_command {
     ($e:tt) => {
@@ -66,6 +70,7 @@ macro_rules! element_method_dispatch {
             Element::EditBox(em) => em.$method(),
             Element::Span(em) => em.$method(),
             Element::StatusLine(em) => em.$method(),
+            Element::Button(em) => em.$method(),
         }
     };
     ($self:expr, $method:ident, $($e:expr),*) => {
@@ -76,6 +81,7 @@ macro_rules! element_method_dispatch {
             Element::EditBox(em) => em.$method($($e),*),
             Element::Span(em) => em.$method($($e),*),
             Element::StatusLine(em) => em.$method($($e),*),
+            Element::Button(em) => em.$method($($e),*),
         }
     };
 }
@@ -87,6 +93,7 @@ pub enum Element {
     EditLine(EditLine),
     EditBox(EditBox),
     StatusLine(StatusLine),
+    Button(Button),
 }
 
 impl Element {
@@ -102,6 +109,7 @@ impl Element {
             Element::EditBox(em) => em.vp.contain_cell(col, row),
             Element::Span(em) => em.vp.contain_cell(col, row),
             Element::StatusLine(em) => em.vp.contain_cell(col, row),
+            Element::Button(em) => em.vp.contain_cell(col, row),
         }
     }
 
@@ -490,7 +498,6 @@ impl Border {
     where
         S: Store,
     {
-        trace!("border  refresh");
         if self.focus && self.render_type == "normal" {
             self.render_type = "highlt";
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
@@ -508,7 +515,6 @@ impl Border {
     {
         trace!("Focus border");
         self.focus = true;
-
         Ok(())
     }
 
@@ -517,7 +523,6 @@ impl Border {
         S: Store,
     {
         self.focus = false;
-
         Ok(())
     }
 
@@ -594,16 +599,16 @@ impl fmt::Display for Border {
         let (col, _) = self.vp.to_origin();
         let col = col + 2;
 
-        let mut span: String = Default::default();
-        span.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
-        span.push_str(
+        let mut title_span: String = Default::default();
+        title_span.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        title_span.push_str(
             &style::style(self.title.clone())
                 .on(BG_LAYER)
                 .with(FG_TITLE)
                 .to_string(),
         );
 
-        write!(f, "{}", span)
+        write!(f, "{}", title_span)
     }
 }
 
@@ -772,6 +777,147 @@ impl fmt::Display for StatusLine {
 }
 
 #[derive(Clone)]
+pub enum ButtonType {
+    Submit,
+    Reset,
+    Cancel,
+    Simple,
+}
+
+impl Default for ButtonType {
+    fn default() -> ButtonType {
+        ButtonType::Simple
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Button {
+    vp: Viewport,
+    text: String,
+    btyp: ButtonType,
+
+    focus: bool,
+    tc_normal: String,
+    tc_highlt: String,
+    render_type: &'static str,
+}
+
+impl_command!(Button);
+
+impl Button {
+    pub fn new<S>(
+        _app: &mut Application<S>,
+        vp: Viewport,
+        text: String,
+        btyp: ButtonType,
+    ) -> Result<Button>
+    where
+        S: Store,
+    {
+        let mut em = Button {
+            vp,
+            text,
+            btyp,
+
+            focus: false,
+            tc_normal: Default::default(),
+            tc_highlt: Default::default(),
+            render_type: "normal",
+        };
+
+        em.tc_normal = em.make_term_cache(BG_BUTTON, FG_BUTTON);
+        em.tc_highlt = em.make_term_cache(BG_BUTTON_HL, FG_BUTTON_HL);
+
+        Ok(em)
+    }
+
+    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        if self.focus && self.render_type == "normal" {
+            self.render_type = "highlt";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        } else if !self.focus && self.render_type == "highlt" {
+            self.render_type = "normal";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
+        Ok(())
+    }
+
+    fn focus<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        trace!("Focus status-line");
+        self.focus = true;
+        Ok(())
+    }
+
+    fn leave<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    where
+        S: Store,
+    {
+        self.focus = false;
+        Ok(())
+    }
+
+    fn handle_event<S>(&mut self, _app: &mut Application<S>, evnt: Event) -> Result<Option<Event>>
+    where
+        S: Store,
+    {
+        Ok(Some(evnt))
+    }
+
+    fn make_term_cache(&self, bg: Color, fg: Color) -> String {
+        use std::iter::repeat;
+
+        let (col, row) = self.vp.to_origin();
+        let (_, width) = self.vp.to_size();
+
+        let mut s: String = Default::default();
+
+        s.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        s.push_str(&{
+            let t_width: u16 = self.text.chars().map(|ch| ch.width().unwrap() as u16).sum();
+            let l_width = (width - t_width) / 2;
+            let r_width = width - t_width - l_width;
+            style::style(
+                String::from_iter(repeat(' ').take(l_width as usize))
+                    + self.text.as_str()
+                    + String::from_iter(repeat(' ').take(r_width as usize)).as_str(),
+            )
+            .on(bg)
+            .with(fg)
+            .to_string()
+        });
+        s
+    }
+}
+
+impl fmt::Display for Button {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        let (col, row) = self.vp.to_origin();
+        let (height, width) = self.vp.to_size();
+
+        trace!(
+            "Button::Viewport col:{} row:{} height:{} width:{}",
+            col,
+            row,
+            height,
+            width
+        );
+
+        match self.render_type {
+            "normal" => write!(f, "{}", self.tc_normal),
+            "highlt" => write!(f, "{}", self.tc_highlt),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct EditLine {
     vp: Viewport,
     inline: String,
@@ -897,10 +1043,10 @@ impl fmt::Display for EditLine {
             let (ed_col, _ed_row) = self.vp.to_ed_origin();
             let mut lines = self
                 .buffer
-                .lines_at(0)
+                .view_lines(0)
+                .into_iter()
                 .map(|s| {
-                    s.to_string()
-                        .chars()
+                    s.chars()
                         .skip(ed_col)
                         .take(width as usize)
                         .collect::<Vec<char>>()
@@ -1057,13 +1203,14 @@ impl fmt::Display for EditBox {
         )?;
         let (_, from) = self.vp.to_ed_origin();
         let (ed_col, _ed_row) = self.vp.to_ed_origin();
-        for (i, line) in self.buffer.lines_at(from).enumerate().take(height as usize) {
-            let line: Vec<char> = line
-                .to_string()
-                .chars()
-                .skip(ed_col)
-                .take(width as usize)
-                .collect();
+        for (i, line) in self
+            .buffer
+            .view_lines(from)
+            .into_iter()
+            .enumerate()
+            .take(height as usize)
+        {
+            let line: Vec<char> = line.chars().skip(ed_col).take(width as usize).collect();
             let line = String::from_iter(line.into_iter());
             write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
             write!(f, "{}", style::style(line).on(BG_EDIT).with(FG_EDIT))?;

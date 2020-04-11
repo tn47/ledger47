@@ -192,7 +192,7 @@ where
                 };
             };
 
-            execute!(self.view.tm.stdout, cursor::Hide);
+            err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide))?;
             self.refresh()?;
             err_at!(Fatal, self.view.tm.stdout.flush())?;
         }
@@ -307,28 +307,28 @@ where
     }
 
     #[inline]
-    fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> &mut Self {
+    fn set_date(&mut self, date: chrono::Date<chrono::Local>) -> Result<&mut Self> {
         self.date = date;
         self.period = util::date_to_period(date);
         {
-            self.publish(Event::Date(self.date.clone()));
+            self.publish(Event::Date(self.date.clone()))?;
             let (from, to) = self.period.clone();
-            self.publish(Event::Period { from, to });
+            self.publish(Event::Period { from, to })?;
         }
-        self
+        Ok(self)
     }
 
     #[inline]
     fn set_period(
         &mut self,
         period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
-    ) -> &mut Self {
+    ) -> Result<&mut Self> {
         self.period = period;
         {
             let (from, to) = self.period.clone();
-            self.publish(Event::Period { from, to });
+            self.publish(Event::Period { from, to })?;
         }
-        self
+        Ok(self)
     }
 
     fn show_cursor(&mut self) -> Result<()> {

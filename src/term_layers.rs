@@ -85,7 +85,7 @@ where
             let mut em = te::EditLine::new(app, input_vp).ok().unwrap();
             em.set_inline("Enter workspace name, only alphanumeric and '_'")
                 .set_mandatory(true);
-            em.refresh(app, true /*force*/);
+            em.refresh(app, true /*force*/)?;
             em
         };
         let comm_head = {
@@ -189,6 +189,7 @@ where
         let evnt = self.elements[off as usize].handle_event(app, evnt)?;
 
         match evnt {
+            Some(Event::Submit) => Ok(None),
             Some(evnt) => match (evnt.to_modifiers(), evnt.to_key_code()) {
                 (m, Some(code)) => match code {
                     KeyCode::Esc if m.is_empty() => match self.focus.tab_to(0) {

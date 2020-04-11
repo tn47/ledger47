@@ -9,6 +9,9 @@ use ledger::{
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    Submit,
+    Reset,
+    Cancel,
     Resize {
         cols: u16,
         rows: u16,
@@ -123,6 +126,9 @@ impl From<event::Event> for Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         match self {
+            Event::Submit => write!(f, "Submit"),
+            Event::Cancel => write!(f, "Cancel"),
+            Event::Reset => write!(f, "Reset"),
             Event::Resize { cols, rows } => write!(f, "resize cols:{} rows:{}", cols, rows),
             Event::Key { code, modifiers } => {
                 write!(f, "key code:{:?} modifier:{:?}", code, modifiers)

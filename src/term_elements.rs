@@ -901,7 +901,15 @@ impl Button {
     where
         S: Store,
     {
-        Ok(Some(evnt))
+        match evnt.to_key_code() {
+            Some(KeyCode::Enter) => match self.btyp {
+                ButtonType::Submit => Ok(Some(Event::Submit)),
+                ButtonType::Cancel => Ok(Some(Event::Cancel)),
+                ButtonType::Reset => Ok(Some(Event::Reset)),
+                ButtonType::Simple => unreachable!(),
+            },
+            _ => Ok(Some(evnt)),
+        }
     }
 
     fn make_term_cache(&self, bg: Color, fg: Color) -> String {
@@ -1410,7 +1418,6 @@ impl fmt::Display for EditBox {
 
         let (_, from) = self.edit_vp.to_ed_origin();
         let (ed_col, _ed_row) = self.edit_vp.to_ed_origin();
-        let mut buf_height = 0;
         for (i, line) in self
             .buffer
             .view_lines(from)
@@ -1426,7 +1433,6 @@ impl fmt::Display for EditBox {
                 cursor::MoveTo(ed_o_col - 1, ed_o_row + (i as u16) - 1).to_string()
             )?;
             write!(f, "{}", style::style(line).on(BG_EDIT).with(FG_EDIT))?;
-            buf_height += 1;
         }
 
         Ok(())

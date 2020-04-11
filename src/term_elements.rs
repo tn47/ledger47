@@ -1,15 +1,14 @@
 use crossterm::{
     cursor,
-    event::KeyCode,
+    event::{KeyCode, KeyModifiers},
     queue,
-    style::{self, Color},
+    style::{self, Attribute, Color},
     Command as TermCommand,
 };
 use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
 
 use std::{
-    cmp,
     convert::TryInto,
     fmt,
     io::Write,
@@ -34,8 +33,8 @@ pub const MIN_ROW: u64 = 1;
 
 pub const BG_LAYER: Color = Color::AnsiValue(235);
 pub const BG_EDIT: Color = Color::AnsiValue(232);
-pub const BG_BUTTON: Color = Color::AnsiValue(232);
-pub const BG_BUTTON_HL: Color = Color::AnsiValue(232);
+pub const BG_BUTTON: Color = Color::AnsiValue(243);
+pub const BG_BUTTON_HL: Color = Color::AnsiValue(255);
 
 pub const FG_PERIOD: Color = Color::AnsiValue(27);
 pub const FG_DATE: Color = Color::AnsiValue(33);
@@ -45,8 +44,10 @@ pub const FG_BORDER_HL: Color = Color::AnsiValue(255);
 pub const FG_EDIT_INLINE: Color = Color::AnsiValue(59);
 pub const FG_EDIT: Color = Color::AnsiValue(15);
 pub const FG_SECTION: Color = Color::AnsiValue(11);
+pub const FG_FIELD: Color = Color::AnsiValue(159);
+pub const FG_MANDATORY: Color = Color::AnsiValue(160);
 pub const FG_STATUS: Color = Color::AnsiValue(15);
-pub const FG_BUTTON: Color = Color::AnsiValue(232);
+pub const FG_BUTTON: Color = Color::AnsiValue(255);
 pub const FG_BUTTON_HL: Color = Color::AnsiValue(232);
 
 macro_rules! impl_command {
@@ -113,11 +114,11 @@ impl Element {
         }
     }
 
-    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
-        element_method_dispatch!(self, refresh, app)
+        element_method_dispatch!(self, refresh, app, force)
     }
 
     pub fn focus<S>(&mut self, app: &mut Application<S>) -> Result<()>
@@ -356,8 +357,10 @@ impl HeadLine {
             rx,
         })
     }
+}
 
-    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+impl HeadLine {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
@@ -379,7 +382,7 @@ impl HeadLine {
             }
         }?;
 
-        if refresh {
+        if refresh || force {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         }
 
@@ -493,8 +496,10 @@ impl Border {
 
         Ok(em)
     }
+}
 
-    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+impl Border {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
@@ -503,6 +508,8 @@ impl Border {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         } else if !self.focus && self.render_type == "highlt" {
             self.render_type = "normal";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        } else if force {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         }
 
@@ -598,7 +605,6 @@ impl fmt::Display for Border {
         // render title
         let (col, _) = self.vp.to_origin();
         let col = col + 2;
-
         let mut title_span: String = Default::default();
         title_span.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
         title_span.push_str(
@@ -607,7 +613,6 @@ impl fmt::Display for Border {
                 .with(FG_TITLE)
                 .to_string(),
         );
-
         write!(f, "{}", title_span)
     }
 }
@@ -622,21 +627,31 @@ pub struct Span {
 impl_command!(Span);
 
 impl Span {
-    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, content: &str, fg: Color) -> Result<Span>
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, content: &str) -> Result<Span>
     where
         S: Store,
     {
         Ok(Span {
             vp,
             content: content.to_string(),
-            fg,
+            fg: FG_SECTION,
         })
     }
 
-    fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+    pub fn set_fg_color(&mut self, color: Color) -> &mut Self {
+        self.fg = color;
+        self
+    }
+}
+
+impl Span {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
+        if force {
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
         Ok(())
     }
 
@@ -712,7 +727,7 @@ impl StatusLine {
     pub fn log(&mut self, msg: &str) {
         use std::iter::repeat;
 
-        if msg.len() > 0 {
+        if !msg.is_empty() {
             debug!("Status <- {}", msg);
         }
 
@@ -723,11 +738,17 @@ impl StatusLine {
             self.line += &String::from_iter(repeat(' ').take(n));
         }
     }
+}
 
-    pub fn refresh<S>(&mut self, _app: &mut Application<S>) -> Result<()>
+impl StatusLine {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
+        if force {
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        }
+
         Ok(())
     }
 
@@ -795,6 +816,7 @@ pub struct Button {
     vp: Viewport,
     text: String,
     btyp: ButtonType,
+    bold: bool,
 
     focus: bool,
     tc_normal: String,
@@ -808,7 +830,7 @@ impl Button {
     pub fn new<S>(
         _app: &mut Application<S>,
         vp: Viewport,
-        text: String,
+        text: &str,
         btyp: ButtonType,
     ) -> Result<Button>
     where
@@ -816,8 +838,9 @@ impl Button {
     {
         let mut em = Button {
             vp,
-            text,
+            text: text.to_string(),
             btyp,
+            bold: false,
 
             focus: false,
             tc_normal: Default::default(),
@@ -831,7 +854,16 @@ impl Button {
         Ok(em)
     }
 
-    pub fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    pub fn set_bold(&mut self, bold: bool) -> &mut Self {
+        self.bold = bold;
+        self.tc_normal = self.make_term_cache(BG_BUTTON, FG_BUTTON);
+        self.tc_highlt = self.make_term_cache(BG_BUTTON_HL, FG_BUTTON_HL);
+        self
+    }
+}
+
+impl Button {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
@@ -840,6 +872,8 @@ impl Button {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         } else if !self.focus && self.render_type == "highlt" {
             self.render_type = "normal";
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        } else if force {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         }
 
@@ -879,19 +913,23 @@ impl Button {
         let mut s: String = Default::default();
 
         s.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        s.push_str(&style::SetBackgroundColor(bg).to_string());
+        s.push_str(&style::SetForegroundColor(fg).to_string());
+        if self.bold {
+            s.push_str(&style::SetAttribute(Attribute::Bold).to_string());
+        }
         s.push_str(&{
-            let t_width: u16 = self.text.chars().map(|ch| ch.width().unwrap() as u16).sum();
+            let t_width: u16 = {
+                let w: usize = self.text.chars().filter_map(char::width).sum();
+                w as u16
+            };
             let l_width = (width - t_width) / 2;
             let r_width = width - t_width - l_width;
-            style::style(
-                String::from_iter(repeat(' ').take(l_width as usize))
-                    + self.text.as_str()
-                    + String::from_iter(repeat(' ').take(r_width as usize)).as_str(),
-            )
-            .on(bg)
-            .with(fg)
-            .to_string()
+            String::from_iter(repeat(' ').take(l_width as usize))
+                + self.text.as_str()
+                + String::from_iter(repeat(' ').take(r_width as usize)).as_str()
         });
+
         s
     }
 }
@@ -920,35 +958,145 @@ impl fmt::Display for Button {
 #[derive(Clone)]
 pub struct EditLine {
     vp: Viewport,
+    edit_vp: Viewport,
+    field: String,
+    mandatory: bool,
     inline: String,
     buffer: Buffer,
     focus: bool,
+
+    tc_line: String,
 }
 
 impl_command!(EditLine);
 
 impl EditLine {
-    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, inline: &str) -> Result<EditLine>
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport) -> Result<EditLine>
     where
         S: Store,
     {
-        Ok(EditLine {
-            vp,
-            focus: false,
-            inline: inline.to_string(),
+        let mut em = EditLine {
+            vp: vp.clone(),
+            edit_vp: vp.clone(),
+            field: Default::default(),
+            mandatory: false,
+            inline: Default::default(),
             buffer: Buffer::empty()?.change_to_insert(),
+            focus: false,
+
+            tc_line: Default::default(),
+        };
+
+        em.tc_line = em.make_term_cache();
+
+        Ok(em)
+    }
+
+    pub fn set_inline(&mut self, inline: &str) -> &mut Self {
+        self.inline = inline.to_string();
+        self.tc_line = self.make_term_cache();
+        self
+    }
+
+    pub fn set_field(&mut self, field: &str) -> &mut Self {
+        self.field = field.to_string();
+        self.edit_vp = {
+            let (_, width) = self.edit_vp.to_size();
+            let w_field: usize = self.field.chars().filter_map(char::width).sum();
+            self.edit_vp
+                .clone()
+                .move_by(w_field as i16, 0)
+                .resize_to(1, width - (w_field as u16))
+        };
+        self.tc_line = self.make_term_cache();
+        self
+    }
+
+    pub fn set_mandatory(&mut self, mandatory: bool) -> &mut Self {
+        self.mandatory = mandatory;
+        self.edit_vp = {
+            let (_, width) = self.edit_vp.to_size();
+            self.edit_vp.clone().resize_to(1, width - 1)
+        };
+        self.tc_line = self.make_term_cache();
+        self
+    }
+
+    fn get_buffer_line(&self) -> String {
+        let (_, ed_width) = self.edit_vp.to_size();
+        let (ed_col, _ed_row) = self.edit_vp.to_ed_origin();
+        let mut lines = self
+            .buffer
+            .view_lines(0)
+            .into_iter()
+            .map(|s| {
+                s.chars()
+                    .skip(ed_col)
+                    .take(ed_width as usize)
+                    .collect::<Vec<char>>()
+            })
+            .collect::<Vec<Vec<char>>>();
+        String::from_iter(match lines.len() {
+            0 => vec![].into_iter(),
+            _ => lines.remove(0).into_iter(),
         })
     }
 
-    pub fn clear_inline(&mut self) -> Result<()> {
-        self.inline.clear();
-        Ok(())
-    }
+    fn make_term_cache(&self) -> String {
+        use std::iter::repeat;
 
-    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+        let (col, row) = self.vp.to_origin();
+        let (ed_col, ed_row) = self.edit_vp.to_origin();
+        let (_, ed_width) = self.edit_vp.to_size();
+
+        let mut s: String = Default::default();
+
+        let edit_line = {
+            let inline = String::from_iter(self.inline.chars().take(ed_width as usize));
+            let w_inline = inline.chars().collect::<Vec<char>>().len();
+            inline + &String::from_iter(repeat(' ').take((ed_width as usize) - w_inline))
+        };
+
+        s.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        if self.field.len() > 0 {
+            s.push_str(
+                &style::style(&self.field)
+                    .on(BG_LAYER)
+                    .with(FG_FIELD)
+                    .to_string(),
+            );
+        }
+        s.push_str(
+            &style::style(edit_line)
+                .on(BG_EDIT)
+                .with(FG_EDIT_INLINE)
+                .to_string(),
+        );
+        if self.mandatory {
+            s.push_str(
+                &style::style('*')
+                    .on(BG_LAYER)
+                    .with(FG_MANDATORY)
+                    .to_string(),
+            );
+        }
+
+        let buf_line = self.get_buffer_line();
+        s.push_str(&cursor::MoveTo(ed_col - 1, ed_row - 1).to_string());
+        s.push_str(&style::style(buf_line).on(BG_EDIT).with(FG_EDIT).to_string());
+
+        s
+    }
+}
+
+impl EditLine {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
+        if force {
+            self.tc_line = self.make_term_cache();
+        }
         if self.focus {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         }
@@ -960,13 +1108,18 @@ impl EditLine {
     where
         S: Store,
     {
-        let (col, row) = self.vp.to_cursor();
+        if !self.inline.is_empty() {
+            self.inline.clear();
+            self.tc_line = self.make_term_cache();
+        }
+
+        let (ed_col, ed_row) = self.edit_vp.to_cursor();
         trace!(
             "Focus edit-line {:?} {:?}",
             self.vp.to_origin(),
             self.vp.to_cursor_off()
         );
-        app.move_cursor(col, row)?;
+        app.move_cursor(ed_col, ed_row)?;
         self.focus = true;
 
         Ok(())
@@ -999,14 +1152,14 @@ impl EditLine {
                     row_at,
                     evnt,
                 } => {
-                    self.vp.apply_ed_cursor((col_at, row_at));
+                    self.edit_vp.apply_ed_cursor((col_at, row_at));
                     Ok(evnt)
                 }
             },
         }?;
 
-        let (col, row) = self.vp.to_cursor();
-        app.move_cursor(col, row)?;
+        let (ed_col, ed_row) = self.edit_vp.to_cursor();
+        app.move_cursor(ed_col, ed_row)?;
 
         Ok(evnt)
     }
@@ -1014,8 +1167,6 @@ impl EditLine {
 
 impl fmt::Display for EditLine {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        use std::iter::repeat;
-
         let (col, row) = self.vp.to_origin();
         let (height, width) = self.vp.to_size();
 
@@ -1026,47 +1177,12 @@ impl fmt::Display for EditLine {
             height,
             width
         );
-        let (col, row) = (col - 1, row - 1);
 
-        let view_line = String::from_iter(repeat(' ').take(width as usize));
-        let inline = {
-            let n_inline = cmp::min(
-                self.inline
-                    .chars()
-                    .map(|c| c.width().unwrap_or(0))
-                    .sum::<usize>() as u16,
-                width,
-            ) as usize;
-            String::from_iter(self.inline.chars().take(n_inline))
-        };
-        let buf_line = {
-            let (ed_col, _ed_row) = self.vp.to_ed_origin();
-            let mut lines = self
-                .buffer
-                .view_lines(0)
-                .into_iter()
-                .map(|s| {
-                    s.chars()
-                        .skip(ed_col)
-                        .take(width as usize)
-                        .collect::<Vec<char>>()
-                })
-                .collect::<Vec<Vec<char>>>();
-            String::from_iter(match lines.len() {
-                0 => vec![].into_iter(),
-                _ => lines.remove(0).into_iter(),
-            })
-        };
+        write!(f, "{}", self.tc_line)?;
 
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(f, "{}", style::style(view_line).on(BG_EDIT).with(BG_EDIT))?;
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
-        )?;
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
+        let buf_line = self.get_buffer_line();
+        let (ed_col, ed_row) = self.edit_vp.to_origin();
+        write!(f, "{}", cursor::MoveTo(ed_col - 1, ed_row - 1))?;
         write!(f, "{}", style::style(buf_line).on(BG_EDIT).with(FG_EDIT))
     }
 }
@@ -1074,36 +1190,123 @@ impl fmt::Display for EditLine {
 #[derive(Clone)]
 pub struct EditBox {
     vp: Viewport,
+    edit_vp: Viewport,
+    field: String,
+    mandatory: bool,
     inline: String,
     buffer: Buffer,
     focus: bool,
+
+    tc_line: String,
 }
 
 impl_command!(EditBox);
 
 impl EditBox {
-    pub fn new<S>(_app: &mut Application<S>, vp: Viewport, inline: &str) -> Result<EditBox>
+    pub fn new<S>(_app: &mut Application<S>, vp: Viewport) -> Result<EditBox>
     where
         S: Store,
     {
-        Ok(EditBox {
-            vp,
-            inline: inline.to_string(),
+        let mut em = EditBox {
+            vp: vp.clone(),
+            edit_vp: vp.clone(),
+            field: Default::default(),
+            mandatory: false,
+            inline: Default::default(),
             buffer: Buffer::empty()?.change_to_insert(),
             focus: false,
-        })
+
+            tc_line: Default::default(),
+        };
+
+        em.tc_line = em.make_term_cache();
+
+        Ok(em)
     }
 
-    pub fn clear_inline(&mut self) -> Result<()> {
-        self.inline.clear();
-        Ok(())
+    pub fn set_inline(&mut self, inline: &str) -> &mut Self {
+        self.inline = inline.to_string();
+        self.tc_line = self.make_term_cache();
+        self
     }
 
-    fn refresh<S>(&mut self, app: &mut Application<S>) -> Result<()>
+    pub fn set_field(&mut self, field: &str) -> &mut Self {
+        self.field = field.to_string();
+        self.edit_vp = {
+            let (height, width) = self.edit_vp.to_size();
+            let w_field: usize = self.field.chars().filter_map(char::width).sum();
+            self.edit_vp
+                .clone()
+                .move_by(w_field as i16, 0)
+                .resize_to(height, width - (w_field as u16))
+        };
+        self.tc_line = self.make_term_cache();
+        self
+    }
+
+    pub fn set_mandatory(&mut self, mandatory: bool) -> &mut Self {
+        self.mandatory = mandatory;
+        self.edit_vp = {
+            let (height, width) = self.edit_vp.to_size();
+            self.edit_vp.clone().resize_to(height, width - 1)
+        };
+        self.tc_line = self.make_term_cache();
+        self
+    }
+
+    fn make_term_cache(&self) -> String {
+        use std::iter::repeat;
+
+        let (col, row) = self.vp.to_origin();
+        let (_, ed_width) = self.edit_vp.to_size();
+
+        let mut s: String = Default::default();
+
+        let edit_line = {
+            let inline = String::from_iter(self.inline.chars().take(ed_width as usize));
+            let w_inline = inline.chars().collect::<Vec<char>>().len();
+            inline + &String::from_iter(repeat(' ').take((ed_width as usize) - w_inline))
+        };
+
+        s.push_str(&cursor::MoveTo(col - 1, row - 1).to_string());
+        if !self.field.is_empty() {
+            s.push_str(
+                &style::style(&self.field)
+                    .on(BG_LAYER)
+                    .with(FG_FIELD)
+                    .to_string(),
+            );
+        }
+        s.push_str(
+            &style::style(edit_line)
+                .on(BG_EDIT)
+                .with(FG_EDIT_INLINE)
+                .to_string(),
+        );
+        if self.mandatory {
+            s.push_str(
+                &style::style('*')
+                    .on(BG_LAYER)
+                    .with(FG_MANDATORY)
+                    .to_string(),
+            );
+        }
+
+        s
+    }
+}
+
+impl EditBox {
+    pub fn refresh<S>(&mut self, app: &mut Application<S>, force: bool) -> Result<()>
     where
         S: Store,
     {
-        if self.focus {
+        if force {
+            if !self.inline.is_empty() {
+                self.tc_line = self.make_term_cache();
+            }
+            err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
+        } else if self.focus {
             err_at!(Fatal, queue!(app.as_mut_stdout(), self))?;
         }
 
@@ -1114,13 +1317,18 @@ impl EditBox {
     where
         S: Store,
     {
-        let (col, row) = self.vp.to_cursor();
+        if !self.inline.is_empty() {
+            self.inline.clear();
+            self.tc_line = self.make_term_cache();
+        }
+
+        let (ed_col, ed_row) = self.edit_vp.to_cursor();
         trace!(
             "Focus edit-box {:?} {:?}",
             self.vp.to_origin(),
             self.vp.to_cursor_off()
         );
-        app.move_cursor(col, row)?;
+        app.move_cursor(ed_col, ed_row)?;
         self.focus = true;
         Ok(())
     }
@@ -1137,22 +1345,28 @@ impl EditBox {
     where
         S: Store,
     {
-        let evnt = match (evnt.to_modifiers(), evnt.to_key_code()) {
-            (m, Some(KeyCode::BackTab)) if m.is_empty() => Ok(Some(evnt)),
+        let m = evnt.to_modifiers();
+        let (alt, ctrl) = (
+            m.contains(KeyModifiers::ALT),
+            m.contains(KeyModifiers::CONTROL),
+        );
+        let evnt = match evnt.to_key_code() {
+            Some(KeyCode::Enter) if alt | ctrl => Ok(Some(evnt)),
+            Some(KeyCode::BackTab) if m.is_empty() => Ok(Some(evnt)),
             _ => match self.buffer.handle_event(evnt)? {
                 EditRes {
                     col_at,
                     row_at,
                     evnt,
                 } => {
-                    self.vp.apply_ed_cursor((col_at, row_at));
+                    self.edit_vp.apply_ed_cursor((col_at, row_at));
                     Ok(evnt)
                 }
             },
         }?;
 
-        let (col, row) = self.vp.to_cursor();
-        app.move_cursor(col, row)?;
+        let (ed_col, ed_row) = self.edit_vp.to_cursor();
+        app.move_cursor(ed_col, ed_row)?;
 
         Ok(evnt)
     }
@@ -1173,36 +1387,18 @@ impl fmt::Display for EditBox {
             width
         );
 
-        let (col, row) = (col - 1, row - 1);
-
-        let view_line = String::from_iter(repeat(' ').take(width as usize));
-        let inline = {
-            let n_inline = cmp::min(
-                self.inline
-                    .chars()
-                    .map(|c| c.width().unwrap_or(0))
-                    .sum::<usize>() as u16,
-                width,
-            ) as usize;
-            String::from_iter(self.inline.chars().take(n_inline))
-        };
-
-        for i in 0..height {
-            write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
-            write!(
-                f,
-                "{}",
-                style::style(view_line.clone()).on(BG_EDIT).with(BG_EDIT)
-            )?;
+        if !self.inline.is_empty() {
+            write!(f, "{}", self.tc_line)?;
         }
-        write!(f, "{}", cursor::MoveTo(col, row).to_string())?;
-        write!(
-            f,
-            "{}",
-            style::style(inline).on(BG_EDIT).with(FG_EDIT_INLINE)
-        )?;
-        let (_, from) = self.vp.to_ed_origin();
-        let (ed_col, _ed_row) = self.vp.to_ed_origin();
+
+        let (ed_o_col, ed_o_row) = self.edit_vp.to_origin();
+        let (_, ed_width) = self.edit_vp.to_size();
+
+        write!(f, "{}", self.tc_line)?;
+
+        let (_, from) = self.edit_vp.to_ed_origin();
+        let (ed_col, _ed_row) = self.edit_vp.to_ed_origin();
+        let mut buf_height = 0;
         for (i, line) in self
             .buffer
             .view_lines(from)
@@ -1210,10 +1406,29 @@ impl fmt::Display for EditBox {
             .enumerate()
             .take(height as usize)
         {
-            let line: Vec<char> = line.chars().skip(ed_col).take(width as usize).collect();
+            let line: Vec<char> = line.chars().skip(ed_col).take(ed_width as usize).collect();
             let line = String::from_iter(line.into_iter());
-            write!(f, "{}", cursor::MoveTo(col, row + (i as u16)).to_string())?;
+            write!(
+                f,
+                "{}",
+                cursor::MoveTo(ed_o_col - 1, ed_o_row + (i as u16) - 1).to_string()
+            )?;
             write!(f, "{}", style::style(line).on(BG_EDIT).with(FG_EDIT))?;
+            buf_height += 1;
+        }
+
+        let view_line = String::from_iter(repeat(' ').take(ed_width as usize));
+        for i in buf_height..height {
+            write!(
+                f,
+                "{}",
+                cursor::MoveTo(ed_o_col - 1, ed_o_row + (i as u16) - 1).to_string()
+            )?;
+            write!(
+                f,
+                "{}",
+                style::style(view_line.clone()).on(BG_EDIT).with(BG_EDIT)
+            )?;
         }
 
         Ok(())

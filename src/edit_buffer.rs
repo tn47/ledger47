@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::trace;
-use ropey::{iter::Lines, Rope};
+use ropey::Rope;
 use unicode_width::UnicodeWidthChar;
 
 use std::{cmp, io};
@@ -167,7 +167,11 @@ impl InsertEvent {
                     (Some(_), None) => update_cursor!(buf, *cursor, *cursor, None),
                     (Some(_), Some(nline)) => {
                         let row_at = line_idx + 1;
-                        let col_at = cmp::min(nline.len_chars() - 1, *cursor - start_idx);
+                        let col_at = if nline.len_chars() > 0 {
+                            cmp::min(nline.len_chars() - 1, *cursor - start_idx)
+                        } else {
+                            0
+                        };
                         update_cursor!(buf, *cursor, buf.line_to_char(row_at) + col_at, None)
                     }
                 }

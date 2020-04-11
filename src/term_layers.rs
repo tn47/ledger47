@@ -1,6 +1,5 @@
 use crossterm::{cursor, event::KeyCode, style, Command as TermCommand};
 use log::trace;
-use unicode_width::UnicodeWidthStr;
 
 use std::{iter::FromIterator, marker};
 
@@ -28,9 +27,9 @@ where
         }
     }
 
-    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
+    pub fn refresh(&mut self, app: &mut Application<S>, force: bool) -> Result<()> {
         match self {
-            Layer::NewWorkspace(layer) => layer.refresh(app),
+            Layer::NewWorkspace(layer) => layer.refresh(app, force),
         }
     }
 
@@ -82,31 +81,63 @@ where
             .ok()
             .unwrap();
         let ws_input_name = {
-            let inline = "Enter workspace name, only alphanumeric and '_'";
-            let input_vp = vp.clone().move_by(5, 3).resize_to(1, 40);
-            te::EditLine::new(app, input_vp, inline).ok().unwrap()
+            let input_vp = vp.clone().move_by(5, 3).resize_to(1, 60);
+            let mut em = te::EditLine::new(app, input_vp).ok().unwrap();
+            em.set_inline("Enter workspace name, only alphanumeric and '_'")
+                .set_mandatory(true);
+            em.refresh(app, true /*force*/);
+            em
         };
         let comm_head = {
             let content = "Enter default commodity details";
             let comm_vp = vp.clone().move_by(5, 5).resize_to(1, 60);
-            te::Span::new(app, comm_vp, content, te::FG_SECTION)
-                .ok()
-                .unwrap()
+            let mut em = te::Span::new(app, comm_vp, content).ok().unwrap();
+            em.set_fg_color(te::FG_SECTION);
+            em
         };
         let comm_input_name = {
-            let inline = "Name of the commodity, only alphanumeric";
             let comm_vp = vp.clone().move_by(8, 7).resize_to(1, 60);
-            te::EditLine::new(app, comm_vp, inline).ok().unwrap()
+            let mut em = te::EditLine::new(app, comm_vp).ok().unwrap();
+            em.set_inline("Name of the commodity, only alphanumeric")
+                .set_mandatory(true)
+                .set_field("Name    :");
+            em
+        };
+        let comm_input_symbol = {
+            let comm_vp = vp.clone().move_by(8, 9).resize_to(1, 60);
+            let mut em = te::EditLine::new(app, comm_vp).ok().unwrap();
+            em.set_inline("Symbol for commodity, EG: '₹'")
+                .set_field("Symbol  :");
+            em
+        };
+        let comm_input_aliases = {
+            let comm_vp = vp.clone().move_by(8, 11).resize_to(1, 60);
+            let mut em = te::EditLine::new(app, comm_vp).ok().unwrap();
+            em.set_inline("Comman separated list of aliases")
+                .set_field("Aliases :");
+            em
         };
         let comm_tags = {
-            let inline = "List of tags, EG: money.asia,exchange.westernunion";
-            let comm_vp = vp.clone().move_by(8, 9).resize_to(1, 60);
-            te::EditLine::new(app, comm_vp, inline).ok().unwrap()
+            let comm_vp = vp.clone().move_by(8, 13).resize_to(1, 60);
+            let mut em = te::EditLine::new(app, comm_vp).ok().unwrap();
+            em.set_inline("List of tags, EG: money.asia,exchange.westernunion")
+                .set_field("Tags    :");
+            em
         };
         let comm_input_notes = {
-            let inline = "Any notes for user consumption";
-            let comm_vp = vp.clone().move_by(8, 11).resize_to(10, 60);
-            te::EditBox::new(app, comm_vp, inline).ok().unwrap()
+            let comm_vp = vp.clone().move_by(8, 15).resize_to(7, 60);
+            let mut em = te::EditBox::new(app, comm_vp).ok().unwrap();
+            em.set_inline("Any notes for user consumption")
+                .set_field("Notes   :");
+            em
+        };
+        let button_ok = {
+            let button_vp = vp.clone().move_by(18, 23).resize_to(1, 4);
+            let mut em = te::Button::new(app, button_vp, "ok", te::ButtonType::Submit)
+                .ok()
+                .unwrap();
+            em.set_bold(true);
+            em
         };
 
         let elements = vec![
@@ -114,22 +145,30 @@ where
             te::Element::EditLine(ws_input_name),
             te::Element::Span(comm_head),
             te::Element::EditLine(comm_input_name),
+            te::Element::EditLine(comm_input_symbol),
+            te::Element::EditLine(comm_input_aliases),
             te::Element::EditLine(comm_tags),
             te::Element::EditBox(comm_input_notes),
+            te::Element::Button(button_ok),
         ];
 
         Ok(NewWorkspace {
             vp,
             elements,
-            focus: TabOffsets::new(vec![1, 3, 4, 5, 0]),
+            focus: TabOffsets::new(vec![1, 3, 4, 5, 6, 7, 8, 0]),
 
             _phantom_s: marker::PhantomData,
         })
     }
+}
 
-    pub fn refresh(&mut self, app: &mut Application<S>) -> Result<()> {
+impl<S> NewWorkspace<S>
+where
+    S: Store,
+{
+    pub fn refresh(&mut self, app: &mut Application<S>, force: bool) -> Result<()> {
         for em in self.elements.iter_mut() {
-            em.refresh(app)?
+            em.refresh(app, force)?
         }
         Ok(())
     }
@@ -151,8 +190,8 @@ where
 
         match evnt {
             Some(evnt) => match (evnt.to_modifiers(), evnt.to_key_code()) {
-                (modifiers, Some(code)) if modifiers.is_empty() => match code {
-                    KeyCode::Esc => match self.focus.tab_to(0) {
+                (m, Some(code)) => match code {
+                    KeyCode::Esc if m.is_empty() => match self.focus.tab_to(0) {
                         Some(old_off) => {
                             self.elements[old_off].leave(app)?;
                             self.focus_element(app)?;
@@ -189,11 +228,6 @@ where
             self.elements[em_idx].focus(app)?;
             app.hide_cursor()?;
         } else {
-            match &mut self.elements[em_idx] {
-                te::Element::EditLine(e) => e.clear_inline()?,
-                te::Element::EditBox(e) => e.clear_inline()?,
-                _ => (),
-            };
             self.elements[em_idx].focus(app)?;
         }
 

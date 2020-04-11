@@ -79,9 +79,13 @@ impl From<event::Event> for Event {
 
         match e {
             event::Event::Resize(cols, rows) => Event::Resize { cols, rows },
-            event::Event::Key(event::KeyEvent { code, modifiers }) => {
-                Event::Key { code, modifiers }
-            }
+            event::Event::Key(event::KeyEvent { code, modifiers }) => match code {
+                KeyCode::Char('\r') | KeyCode::Char('\n') => Event::Key {
+                    code: KeyCode::Enter,
+                    modifiers,
+                },
+                code => Event::Key { code, modifiers },
+            },
             event::Event::Mouse(m) => match m {
                 Down(button, col, row, modifiers) => Event::MouseDown {
                     button,

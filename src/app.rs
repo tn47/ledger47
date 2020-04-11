@@ -159,7 +159,7 @@ where
 
     fn event_loop(mut self) -> Result<()> {
         self.view.status.log("");
-        self.refresh()?.render()?;
+        self.refresh(true /*force*/)?.render()?;
 
         match self.view.layers.pop() {
             Some(mut layer) => {
@@ -193,7 +193,7 @@ where
             };
 
             err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide))?;
-            self.refresh()?;
+            self.refresh(false /*force*/)?;
             err_at!(Fatal, self.view.tm.stdout.flush())?;
         }
     }
@@ -216,19 +216,19 @@ where
         Ok(evnt)
     }
 
-    fn refresh(&mut self) -> Result<&mut Self> {
+    fn refresh(&mut self, force: bool) -> Result<&mut Self> {
         let mut head = mem::replace(&mut self.view.head, Default::default());
-        head.refresh(self)?;
+        head.refresh(self, force)?;
         self.view.head = head;
 
         let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
         for layer in layers.iter_mut() {
-            layer.refresh(self)?;
+            layer.refresh(self, force)?;
         }
         self.view.layers = layers;
 
         let mut status = mem::replace(&mut self.view.status, Default::default());
-        status.refresh(self)?;
+        status.refresh(self, force)?;
         self.view.status = status;
 
         Ok(self)

@@ -1394,7 +1394,19 @@ impl fmt::Display for EditBox {
         let (ed_o_col, ed_o_row) = self.edit_vp.to_origin();
         let (_, ed_width) = self.edit_vp.to_size();
 
-        write!(f, "{}", self.tc_line)?;
+        let view_line = String::from_iter(repeat(' ').take(ed_width as usize));
+        for i in 0..height {
+            write!(
+                f,
+                "{}",
+                cursor::MoveTo(ed_o_col - 1, ed_o_row + (i as u16) - 1).to_string()
+            )?;
+            write!(
+                f,
+                "{}",
+                style::style(view_line.clone()).on(BG_EDIT).with(BG_EDIT)
+            )?;
+        }
 
         let (_, from) = self.edit_vp.to_ed_origin();
         let (ed_col, _ed_row) = self.edit_vp.to_ed_origin();
@@ -1415,20 +1427,6 @@ impl fmt::Display for EditBox {
             )?;
             write!(f, "{}", style::style(line).on(BG_EDIT).with(FG_EDIT))?;
             buf_height += 1;
-        }
-
-        let view_line = String::from_iter(repeat(' ').take(ed_width as usize));
-        for i in buf_height..height {
-            write!(
-                f,
-                "{}",
-                cursor::MoveTo(ed_o_col - 1, ed_o_row + (i as u16) - 1).to_string()
-            )?;
-            write!(
-                f,
-                "{}",
-                style::style(view_line.clone()).on(BG_EDIT).with(BG_EDIT)
-            )?;
         }
 
         Ok(())

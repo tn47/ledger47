@@ -989,7 +989,7 @@ impl EditLine {
             field: Default::default(),
             mandatory: false,
             inline: Default::default(),
-            buffer: Buffer::empty()?.change_to_insert(),
+            buffer: Buffer::empty()?,
             focus: false,
 
             tc_line: Default::default(),
@@ -1221,7 +1221,7 @@ impl EditBox {
             field: Default::default(),
             mandatory: false,
             inline: Default::default(),
-            buffer: Buffer::empty()?.change_to_insert(),
+            buffer: Buffer::empty()?,
             focus: false,
 
             tc_line: Default::default(),

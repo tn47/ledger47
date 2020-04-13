@@ -1,4 +1,4 @@
-use std::{fmt, result};
+use std::{ffi, fmt, result};
 
 use crate::types;
 
@@ -18,6 +18,10 @@ pub trait Durable: Default + Clone {
 
 pub trait Store: Sized {
     type Txn: Transaction<Self>;
+
+    fn create(dir: &ffi::OsStr, w: types::Workspace) -> Result<Self>;
+
+    fn open(dir: &ffi::OsStr) -> Result<Self>;
 
     fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
@@ -76,7 +80,11 @@ where
         to: chrono::DateTime<chrono::Utc>,
     ) -> Result<Box<dyn Iterator<Item = Result<types::JournalEntry>>>>;
 
-    fn end(&mut self) -> Result<S>;
+    fn end(self) -> Result<S>;
+}
+
+pub trait Reduce<T> {
+    fn reduce(&mut self, doc: &T) -> Result<()>;
 }
 
 #[derive(Clone)]

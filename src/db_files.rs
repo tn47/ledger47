@@ -2,7 +2,7 @@ use chrono::{self, offset::TimeZone, Datelike};
 use git2;
 use log::trace;
 
-use std::{ffi, fs, mem, path};
+use std::{ffi, fs, path};
 
 use crate::{
     core::{Durable, Error, Result, Store, Transaction},
@@ -112,107 +112,11 @@ impl From<FileLoc> for ffi::OsString {
     }
 }
 
-#[derive(Default)]
 pub struct Db {
     dir: ffi::OsString,
     w: Workspace,
     repo: Option<git2::Repository>,
     remotes: Vec<git2::Repository>,
-}
-
-impl Db {
-    pub fn open(dir: &ffi::OsStr) -> Result<Db> {
-        let w_dir = path::Path::new(dir);
-        if w_dir.exists() {
-            let file_loc = FileLoc::from_key(dir, "workspace");
-            let w: Workspace = file_loc.to_value()?;
-
-            let repo = err_at!(
-                IOError,
-                git2::Repository::open(dir),
-                format!("can't open git repository: {:?}", dir)
-            )?;
-
-            let mut remotes = vec![];
-            for remote in w.remotes.iter() {
-                let remote: &ffi::OsStr = remote.as_ref();
-                remotes.push(err_at!(
-                    IOError,
-                    git2::Repository::open(remote),
-                    format!("can't open remote git repository: {:?}", remote)
-                )?);
-            }
-
-            let mut db = Db {
-                dir: w_dir.as_os_str().to_os_string(),
-                w,
-                repo: Some(repo),
-                remotes,
-            };
-
-            // check for broken transactions.
-            {
-                let head_commit = db.get_head_commit()?;
-                if head_commit.message().unwrap().starts_with("txn commit") {
-                    let parent = err_at!(IOError, head_commit.parent(0), format!("git parent"))?;
-                    let mut cob = git2::build::CheckoutBuilder::new();
-                    cob.force();
-                    err_at!(
-                        IOError,
-                        db.repo.as_ref().unwrap().reset(
-                            parent.as_object(),
-                            git2::ResetType::Hard,
-                            Some(&mut cob)
-                        ),
-                        format!("git reset")
-                    )?;
-                }
-            }
-
-            db.w.set_txn_uuid(0);
-            db.put(db.w.clone())?;
-            db.do_commit("user commit")?;
-
-            Ok(db)
-        } else {
-            err_at!(NotFound, msg: format!("dir:{:?}", dir))?
-        }
-    }
-
-    pub fn create(dir: &ffi::OsStr, w: Workspace) -> Result<Db> {
-        let repo = err_at!(
-            IOError,
-            git2::Repository::init(dir),
-            format!("can't initialise git repository: {:?}", dir)
-        )?;
-
-        let mut remotes = vec![];
-        for remote in w.remotes.iter() {
-            let remote: &ffi::OsStr = remote.as_ref();
-            remotes.push(err_at!(
-                IOError,
-                git2::Repository::open(remote),
-                format!("can't open remote git repository: {:?}", remote)
-            )?);
-        }
-
-        let mut db = Db {
-            dir: dir.to_os_string(),
-            w,
-            repo: Some(repo),
-            remotes,
-        };
-        err_at!(IOError, fs::create_dir_all(&dir))?;
-        err_at!(IOError, fs::create_dir_all(&db.to_metadata_dir().0))?;
-        err_at!(IOError, fs::create_dir_all(&db.to_journal_dir().0))?;
-
-        let file_loc = FileLoc::from_key(&dir, "workspace");
-        file_loc.put(db.w.clone())?;
-
-        db.do_commit("user commit")?;
-
-        Ok(db)
-    }
 }
 
 impl Db {
@@ -301,6 +205,99 @@ impl Db {
 
 impl Store for Db {
     type Txn = DbTransaction;
+
+    fn create(dir: &ffi::OsStr, w: Workspace) -> Result<Db> {
+        let repo = err_at!(
+            IOError,
+            git2::Repository::init(dir),
+            format!("can't initialise git repository: {:?}", dir)
+        )?;
+
+        let mut remotes = vec![];
+        for remote in w.remotes.iter() {
+            let remote: &ffi::OsStr = remote.as_ref();
+            remotes.push(err_at!(
+                IOError,
+                git2::Repository::open(remote),
+                format!("can't open remote git repository: {:?}", remote)
+            )?);
+        }
+
+        let mut db = Db {
+            dir: dir.to_os_string(),
+            w,
+            repo: Some(repo),
+            remotes,
+        };
+        err_at!(IOError, fs::create_dir_all(&dir))?;
+        err_at!(IOError, fs::create_dir_all(&db.to_metadata_dir().0))?;
+        err_at!(IOError, fs::create_dir_all(&db.to_journal_dir().0))?;
+
+        let file_loc = FileLoc::from_key(&dir, "workspace");
+        file_loc.put(db.w.clone())?;
+
+        db.do_commit("user commit")?;
+
+        Ok(db)
+    }
+
+    fn open(dir: &ffi::OsStr) -> Result<Db> {
+        let w_dir = path::Path::new(dir);
+        if w_dir.exists() {
+            let file_loc = FileLoc::from_key(dir, "workspace");
+            let w: Workspace = file_loc.to_value()?;
+
+            let repo = err_at!(
+                IOError,
+                git2::Repository::open(dir),
+                format!("can't open git repository: {:?}", dir)
+            )?;
+
+            let mut remotes = vec![];
+            for remote in w.remotes.iter() {
+                let remote: &ffi::OsStr = remote.as_ref();
+                remotes.push(err_at!(
+                    IOError,
+                    git2::Repository::open(remote),
+                    format!("can't open remote git repository: {:?}", remote)
+                )?);
+            }
+
+            let mut db = Db {
+                dir: w_dir.as_os_str().to_os_string(),
+                w,
+                repo: Some(repo),
+                remotes,
+            };
+
+            // check for broken transactions.
+            {
+                let head_commit = db.get_head_commit()?;
+                if head_commit.message().unwrap().starts_with("txn commit") {
+                    let parent = err_at!(IOError, head_commit.parent(0), format!("git parent"))?;
+                    let mut cob = git2::build::CheckoutBuilder::new();
+                    cob.force();
+                    err_at!(
+                        IOError,
+                        db.repo.as_ref().unwrap().reset(
+                            parent.as_object(),
+                            git2::ResetType::Hard,
+                            Some(&mut cob)
+                        ),
+                        format!("git reset")
+                    )?;
+                }
+            }
+
+            db.w.set_txn_uuid(0);
+            db.put(db.w.clone())?;
+            db.do_commit("user commit")?;
+
+            Ok(db)
+        } else {
+            err_at!(NotFound, msg: format!("dir:{:?}", dir))?
+        }
+    }
 
     fn put<V>(&mut self, value: V) -> Result<Option<V>>
     where
@@ -448,7 +445,7 @@ impl Transaction<Db> for DbTransaction {
         self.db.iter_journal(from, to)
     }
 
-    fn end(&mut self) -> Result<Db> {
+    fn end(mut self) -> Result<Db> {
         {
             let object = err_at!(
                 IOError,
@@ -475,11 +472,10 @@ impl Transaction<Db> for DbTransaction {
             );
         }
 
-        let mut db = mem::replace(&mut self.db, Default::default());
-        db.w.set_txn_uuid(0);
-        db.put(db.w.clone())?;
+        self.db.w.set_txn_uuid(0);
+        self.db.put(self.db.w.clone())?;
 
-        Ok(db)
+        Ok(self.db)
     }
 }
 

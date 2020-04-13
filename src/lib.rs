@@ -1,3 +1,4 @@
+pub mod aggregates;
 pub mod core;
 #[macro_use]
 pub mod util;

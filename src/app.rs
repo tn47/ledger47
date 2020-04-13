@@ -17,28 +17,11 @@ use crate::{
     event::{self, Event},
     term_elements as te,
     term_layers::{self as tl, Layer},
-    Opt,
 };
 use ledger::{
     core::{Error, Result, Store},
-    db_files, err_at, util,
+    err_at, util,
 };
-
-pub fn run(opts: Opt) -> Result<()> {
-    let dir: &ffi::OsStr = opts.dir.as_ref();
-    let store = match db_files::Db::open(dir) {
-        Ok(store) => Ok(Some(store)),
-        Err(Error::NotFound(_)) => Ok(None),
-        Err(err) => Err(err),
-    }?;
-
-    let app = match store {
-        None => Application::<db_files::Db>::new_workspace(dir.to_os_string())?,
-        Some(_store) => todo!(),
-    };
-
-    app.event_loop()
-}
 
 enum ViewFocus {
     Layer,
@@ -99,20 +82,43 @@ where
     period: (chrono::Date<chrono::Local>, chrono::Date<chrono::Local>),
 }
 
+impl<S> AsRef<S> for Application<S>
+where
+    S: Store,
+{
+    fn as_ref(&self) -> &S {
+        match &self.store {
+            Some(store) => store,
+            None => unreachable!(),
+        }
+    }
+}
+
+impl<S> AsMut<S> for Application<S>
+where
+    S: Store,
+{
+    fn as_mut(&mut self) -> &mut S {
+        match &mut self.store {
+            Some(store) => store,
+            None => unreachable!(),
+        }
+    }
+}
+
 impl<S> Application<S>
 where
     S: Store,
 {
-    fn new_workspace(dir: ffi::OsString) -> Result<Application<S>> {
+    pub fn run(dir: &ffi::OsStr) -> Result<()> {
         let mut app = Application {
-            dir: dir.clone(),
+            dir: dir.to_os_string(),
             view: View::new()?,
             listeners: Default::default(),
             store: Default::default(),
             date: chrono::Local::now().date(),
             period: util::date_to_period(chrono::Local::now().date()),
         };
-
         app.view.head = {
             let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
             te::HeadLine::new(&mut app, vp)?
@@ -122,39 +128,25 @@ where
             te::StatusLine::new(&mut app, vp)?
         };
 
-        let layer = tl::NewWorkspace::new(&mut app)?;
-        app.view.layers.push(Layer::NewWorkspace(layer));
+        match S::open(dir) {
+            Ok(store) => {
+                info!("Open workspace dir:{:?}", dir);
+                app.store = Some(store);
+                app.view.layers = vec![Layer::OpenCompany(tl::OpenCompany::new(&mut app)?)];
+                Ok(())
+            }
+            Err(Error::NotFound(_)) => {
+                info!("New workspace dir:{:?}", dir);
+                app.view.layers = vec![
+                    Layer::OpenCompany(tl::OpenCompany::new(&mut app)?),
+                    Layer::NewWorkspace(tl::NewWorkspace::new(&mut app)?),
+                ];
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }?;
 
-        info!("New workspace dir:{:?}", dir);
-
-        Ok(app)
-    }
-
-    fn new(dir: ffi::OsString) -> Result<Application<S>> {
-        let mut app = Application {
-            dir: dir.clone(),
-            view: View::new()?,
-            listeners: Default::default(),
-            store: Default::default(),
-            date: chrono::Local::now().date(),
-            period: util::date_to_period(chrono::Local::now().date()),
-        };
-
-        app.view.head = {
-            let vp = te::Viewport::new(1, 1, 1, app.view.tm.cols);
-            te::HeadLine::new(&mut app, vp)?
-        };
-        app.view.status = {
-            let vp = te::Viewport::new(1, app.view.tm.rows, 1, app.view.tm.cols);
-            te::StatusLine::new(&mut app, vp)?
-        };
-
-        let layer = tl::NewWorkspace::new(&mut app)?;
-        app.view.layers.push(Layer::NewWorkspace(layer));
-
-        info!("Open workspace dir:{:?}", dir);
-
-        Ok(app)
+        app.event_loop()
     }
 
     fn event_loop(mut self) -> Result<()> {
@@ -177,20 +169,28 @@ where
 
             let evnt = match evnt {
                 Event::Resize { .. } => None,
-                evnt => self.handle_event(evnt)?,
+                mut evnt => {
+                    let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
+                    for layer in layers.iter_mut().rev() {
+                        evnt = match layer.handle_event(&mut self, evnt.clone())? {
+                            Some(evnt) => evnt,
+                            None => break,
+                        }
+                    }
+                    self.view.layers = layers;
+                    Some(evnt)
+                }
             };
 
             if let Some(evnt) = evnt {
-                match (evnt.to_modifiers(), evnt.to_key_code()) {
-                    (m, Some(KeyCode::Char('q'))) if m.is_empty() => break Ok(()),
-                    (m, Some(KeyCode::Esc)) if m.is_empty() => {
-                        if self.view.layers.len() > 1 {
-                            self.view.layers.pop();
-                        }
+                let m = evnt.to_modifiers();
+                match evnt.to_key_code() {
+                    Some(KeyCode::Char('q')) if m.is_empty() => break Ok(()),
+                    _ => {
+                        self.handle_event(evnt)?;
                     }
-                    _ => (),
-                };
-            };
+                }
+            }
 
             err_at!(Fatal, execute!(self.view.tm.stdout, cursor::Hide))?;
             self.refresh(false /*force*/)?;
@@ -199,21 +199,15 @@ where
     }
 
     fn handle_event(&mut self, mut evnt: Event) -> Result<Option<Event>> {
-        let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
-        let mut iter = layers.iter_mut().rev();
-        let evnt = loop {
-            if let Some(layer) = iter.next() {
-                evnt = match layer.handle_event(self, evnt)? {
-                    Some(evnt) => evnt,
-                    None => break None,
-                }
-            } else {
-                break Some(evnt);
+        let m = evnt.to_modifiers();
+        match evnt.to_key_code() {
+            Some(KeyCode::Esc) if m.is_empty() && self.view.layers.len() > 1 => {
+                self.view.layers.pop();
+                self.refresh(true /*force*/)?.render()?;
+                Ok(None)
             }
-        };
-        self.view.layers = layers;
-
-        Ok(evnt)
+            _ => Ok(Some(evnt)),
+        }
     }
 
     fn refresh(&mut self, force: bool) -> Result<&mut Self> {

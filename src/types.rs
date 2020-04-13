@@ -5,6 +5,7 @@ use uuid;
 use std::{
     cmp,
     convert::{TryFrom, TryInto},
+    fmt, result,
 };
 
 use crate::{
@@ -133,6 +134,43 @@ impl Durable for Workspace {
     }
 }
 
+#[derive(Clone)]
+struct KeyCommodity(String);
+
+// (commodity-name,)
+impl From<(String,)> for KeyCommodity {
+    fn from((name,): (String,)) -> KeyCommodity {
+        KeyCommodity(format!("commodity-{}", name))
+    }
+}
+
+impl From<KeyCommodity> for (String,) {
+    fn from(ck: KeyCommodity) -> (String,) {
+        match ck.0.split('-').collect::<Vec<&str>>().as_slice() {
+            ["commodity", name] => (name.to_string(),),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<KeyCommodity> for Json {
+    fn from(ck: KeyCommodity) -> Json {
+        Json::String(ck.0)
+    }
+}
+
+impl From<Json> for KeyCommodity {
+    fn from(jval: Json) -> KeyCommodity {
+        KeyCommodity(jval.to_string())
+    }
+}
+
+impl fmt::Display for KeyCommodity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, JsonSerialize)]
 pub struct Commodity {
     name: String,
@@ -238,57 +276,6 @@ impl Commodity {
             note: Default::default(),
         }
     }
-
-    fn set_symbol(mut self, symbol: String) -> Commodity {
-        self.symbol = symbol;
-        self
-    }
-
-    fn has_alias(&self, alias: &str) -> bool {
-        self.aliases.iter().any(|a| a == alias)
-    }
-
-    fn add_alias(&mut self, alias: &str) {
-        if !self.has_alias(alias) {
-            self.aliases.push(alias.to_string())
-        }
-
-        self.aliases.sort();
-    }
-
-    fn remove_alias(&mut self, alias: &str) {
-        for i in 0..self.aliases.len() {
-            if self.aliases[i] == alias {
-                self.aliases.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn has_tag(&self, tag: &str) -> bool {
-        self.tags.iter().any(|t| t == tag)
-    }
-
-    fn add_tag(&mut self, tag: &str) {
-        if !self.has_tag(tag) {
-            self.tags.push(tag.to_string())
-        }
-
-        self.tags.sort();
-    }
-
-    fn remove_tag(&mut self, tag: &str) {
-        for i in 0..self.tags.len() {
-            if self.tags[i] == tag {
-                self.tags.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn set_note(&mut self, note: String) {
-        self.note = note
-    }
 }
 
 impl Durable for Commodity {
@@ -297,7 +284,8 @@ impl Durable for Commodity {
     }
 
     fn to_key(&self) -> String {
-        format!("{}-{}", self.to_type(), self.name)
+        let ck: KeyCommodity = (self.name.clone(),).into();
+        ck.to_string()
     }
 
     fn encode(&self) -> Result<String> {
@@ -309,6 +297,43 @@ impl Durable for Commodity {
         let jval: Json = err_at!(InvalidJson, from.parse())?;
         *self = err_at!(InvalidJson, jval.try_into())?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct KeyCompany(String);
+
+// (company-name,)
+impl From<(String,)> for KeyCompany {
+    fn from((name,): (String,)) -> KeyCompany {
+        KeyCompany(format!("company-{}", name))
+    }
+}
+
+impl From<KeyCompany> for (String,) {
+    fn from(ck: KeyCompany) -> (String,) {
+        match ck.0.split('-').collect::<Vec<&str>>().as_slice() {
+            ["company", name] => (name.to_string(),),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<KeyCompany> for Json {
+    fn from(ck: KeyCompany) -> Json {
+        Json::String(ck.0)
+    }
+}
+
+impl From<Json> for KeyCompany {
+    fn from(jval: Json) -> KeyCompany {
+        KeyCompany(jval.to_string())
+    }
+}
+
+impl fmt::Display for KeyCompany {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -407,52 +432,6 @@ impl Company {
             note: Default::default(),
         }
     }
-
-    fn has_alias(&self, alias: &str) -> bool {
-        self.aliases.iter().any(|a| a == alias)
-    }
-
-    fn add_alias(&mut self, alias: &str) {
-        if !self.has_alias(alias) {
-            self.aliases.push(alias.to_string())
-        }
-
-        self.aliases.sort();
-    }
-
-    fn remove_alias(&mut self, alias: &str) {
-        for i in 0..self.aliases.len() {
-            if self.aliases[i] == alias {
-                self.aliases.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn has_tag(&self, tag: &str) -> bool {
-        self.tags.iter().any(|t| t == tag)
-    }
-
-    fn add_tag(&mut self, tag: &str) {
-        if !self.has_tag(tag) {
-            self.tags.push(tag.to_string())
-        }
-
-        self.tags.sort();
-    }
-
-    fn remove_tag(&mut self, tag: &str) {
-        for i in 0..self.tags.len() {
-            if self.tags[i] == tag {
-                self.tags.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn set_note(&mut self, note: String) {
-        self.note = note
-    }
 }
 
 impl Durable for Company {
@@ -461,7 +440,8 @@ impl Durable for Company {
     }
 
     fn to_key(&self) -> String {
-        format!("{}-{}", self.to_type(), self.name)
+        let ck: KeyCompany = (self.name.clone(),).into();
+        ck.to_string()
     }
 
     fn encode(&self) -> Result<String> {
@@ -473,6 +453,43 @@ impl Durable for Company {
         let jval: Json = err_at!(InvalidJson, from.parse())?;
         *self = err_at!(InvalidJson, jval.try_into())?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct KeyLedger(String);
+
+// (company-name, ledger-name)
+impl From<(String, String)> for KeyLedger {
+    fn from((cname, lname): (String, String)) -> KeyLedger {
+        KeyLedger(format!("ledger-{}-{}", cname, lname))
+    }
+}
+
+impl From<KeyLedger> for (String, String) {
+    fn from(ck: KeyLedger) -> (String, String) {
+        match ck.0.split('-').collect::<Vec<&str>>().as_slice() {
+            ["ledger", cname, lname] => (cname.to_string(), lname.to_string()),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<KeyLedger> for Json {
+    fn from(ck: KeyLedger) -> Json {
+        Json::String(ck.0)
+    }
+}
+
+impl From<Json> for KeyLedger {
+    fn from(jval: Json) -> KeyLedger {
+        KeyLedger(jval.to_string())
+    }
+}
+
+impl fmt::Display for KeyLedger {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -611,52 +628,6 @@ impl Ledger {
             note: Default::default(),
         }
     }
-
-    fn has_alias(&self, alias: &str) -> bool {
-        self.aliases.iter().any(|a| a == alias)
-    }
-
-    fn add_alias(&mut self, alias: &str) {
-        if !self.has_alias(alias) {
-            self.aliases.push(alias.to_string())
-        }
-
-        self.aliases.sort();
-    }
-
-    fn remove_alias(&mut self, alias: &str) {
-        for i in 0..self.aliases.len() {
-            if self.aliases[i] == alias {
-                self.aliases.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn has_tag(&self, tag: &str) -> bool {
-        self.tags.iter().any(|t| t == tag)
-    }
-
-    fn add_tag(&mut self, tag: &str) {
-        if !self.has_tag(tag) {
-            self.tags.push(tag.to_string())
-        }
-
-        self.tags.sort();
-    }
-
-    fn remove_tag(&mut self, tag: &str) {
-        for i in 0..self.tags.len() {
-            if self.tags[i] == tag {
-                self.tags.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn set_note(&mut self, note: String) {
-        self.note = note
-    }
 }
 
 impl Durable for Ledger {
@@ -665,7 +636,8 @@ impl Durable for Ledger {
     }
 
     fn to_key(&self) -> String {
-        format!("{}-{}-{}", self.to_type(), self.company, self.name)
+        let lk: KeyLedger = (self.company.clone(), self.name.clone()).into();
+        lk.to_string()
     }
 
     fn encode(&self) -> Result<String> {
@@ -682,70 +654,141 @@ impl Durable for Ledger {
 
 #[derive(Clone, JsonSerialize)]
 pub(crate) struct Creditor {
-    ledger: Key,
-    commodity: (Key, f64),
+    pub(crate) ledger: KeyLedger,
+    pub(crate) commodity: Commodity,
 }
 
-// TryFrom<(ledger-key, commodity-key)>
-impl TryFrom<(String, String, f64)> for Creditor {
+// (company-name, ledger-name, commodity-name, value)
+impl TryFrom<(String, String, String, f64)> for Creditor {
     type Error = Error;
 
-    fn try_from((ledger_key, commodity_key, value): (String, String, f64)) -> Result<Creditor> {
-        let ledger = {
-            let ledger_key = ledger_key.trim().to_string();
-            if util::str_as_anuh(ledger_key.as_str()) == false {
+    fn try_from(
+        (company_name, ledger_name, commodity_name, value): (String, String, String, f64),
+    ) -> Result<Creditor> {
+        let lk: KeyLedger = {
+            let ln = ledger_name.trim().to_string();
+            let ln = if util::str_as_anuh(ln.as_str()) == false {
                 Err(Error::InvalidInput("ledger".to_string()))
             } else {
-                Ok(ledger_key)
-            }
-        }?;
-        let commodity = {
-            let commodity = commodity_key.trim().to_string();
-            if util::str_as_anuh(commodity.as_str()) == false {
+                Ok(ln)
+            }?;
+            let cn = company_name.trim().to_string();
+            let cn = if util::str_as_anuh(cn.as_str()) == false {
+                Err(Error::InvalidInput("company".to_string()))
+            } else {
+                Ok(cn)
+            }?;
+            (cn, ln).into()
+        };
+
+        let commodity_name = {
+            let cn = commodity_name.trim().to_string();
+            if util::str_as_anuh(cn.as_str()) == false {
                 Err(Error::InvalidInput("commodity".to_string()))
             } else {
-                Ok(commodity)
-            }
-        }?;
+                Ok(cn)
+            }?
+        };
 
         Ok(Creditor {
-            ledger,
-            commodity: (commodity, value).into(),
+            ledger: lk,
+            commodity: (commodity_name, value).into(),
         })
     }
 }
+
 #[derive(Clone, JsonSerialize)]
 pub(crate) struct Debitor {
-    ledger: Key,
-    commodity: (Key, f64),
+    pub(crate) ledger: KeyLedger,
+    pub(crate) commodity: Commodity,
 }
 
-// TryFrom<(ledger-key, commodity-key)>
-impl TryFrom<(String, String, f64)> for Debitor {
+// TryFrom<(company-name, ledger-name, commodity-name, value)>
+impl TryFrom<(String, String, String, f64)> for Debitor {
     type Error = Error;
 
-    fn try_from((ledger_key, commodity_key, value): (String, String, f64)) -> Result<Debitor> {
-        let ledger = {
-            let ledger_key = ledger_key.trim().to_string();
-            if util::str_as_anuh(ledger_key.as_str()) == false {
+    fn try_from(
+        (company_name, ledger_name, commodity_name, value): (String, String, String, f64),
+    ) -> Result<Debitor> {
+        let lk: KeyLedger = {
+            let ln = ledger_name.trim().to_string();
+            let ln = if util::str_as_anuh(ln.as_str()) == false {
                 Err(Error::InvalidInput("ledger".to_string()))
             } else {
-                Ok(ledger_key)
-            }
-        }?;
-        let commodity = {
-            let commodity = commodity_key.trim().to_string();
-            if util::str_as_anuh(commodity.as_str()) == false {
+                Ok(ln)
+            }?;
+            let cn = company_name.trim().to_string();
+            let cn = if util::str_as_anuh(cn.as_str()) == false {
+                Err(Error::InvalidInput("company".to_string()))
+            } else {
+                Ok(cn)
+            }?;
+            (cn, ln).into()
+        };
+
+        let commodity_name = {
+            let cn = commodity_name.trim().to_string();
+            if util::str_as_anuh(cn.as_str()) == false {
                 Err(Error::InvalidInput("commodity".to_string()))
             } else {
-                Ok(commodity)
-            }
-        }?;
+                Ok(cn)
+            }?
+        };
 
         Ok(Debitor {
-            ledger,
-            commodity: (commodity, value).into(),
+            ledger: lk,
+            commodity: (commodity_name, value).into(),
         })
+    }
+}
+
+#[derive(Clone)]
+struct KeyJournalEntry(String);
+
+impl From<(i32, u32, u32, u128)> for KeyJournalEntry {
+    fn from((y, m, d, uuid): (i32, u32, u32, u128)) -> KeyJournalEntry {
+        KeyJournalEntry(format!("{}-{}-{}-journalentry-{}", y, m, d, uuid))
+    }
+}
+
+impl From<KeyJournalEntry> for String {
+    fn from(jek: KeyJournalEntry) -> String {
+        jek.0
+    }
+}
+
+impl From<KeyJournalEntry> for Json {
+    fn from(jek: KeyJournalEntry) -> Json {
+        Json::String(jek.0)
+    }
+}
+
+impl From<Json> for KeyJournalEntry {
+    fn from(jval: Json) -> KeyJournalEntry {
+        KeyJournalEntry(jval.to_string())
+    }
+}
+
+impl TryFrom<KeyJournalEntry> for (i32, u32, u32, u128) {
+    type Error = Error;
+
+    fn try_from(jek: KeyJournalEntry) -> Result<(i32, u32, u32, u128)> {
+        match jek.0.split('-').collect::<Vec<&str>>().as_slice() {
+            [y, m, d, uuid] => {
+                let year: i32 = err_at!(ConvertFail, y.parse())?;
+                let month: u32 = err_at!(ConvertFail, m.parse())?;
+                let day: u32 = err_at!(ConvertFail, d.parse())?;
+                let uuid: u128 = err_at!(ConvertFail, uuid.parse())?;
+                Ok((year, month, day, uuid))
+            }
+            _ => err_at!(Fatal, msg: format!("invalid journal-entry-key {}", jek)),
+        }
+    }
+}
+
+impl fmt::Display for KeyJournalEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -795,30 +838,12 @@ impl Default for JournalEntry {
     }
 }
 
-// TryFrom<(uuid, payee, created, creditors, debitors, tags, note)>
-impl
-    TryFrom<(
-        u128,
-        String,
-        String,
-        Vec<Creditor>,
-        Vec<Debitor>,
-        String,
-        String,
-    )> for JournalEntry
-{
+// TryFrom<(uuid, payee, created, tags, note)>
+impl TryFrom<(u128, String, String, String, String)> for JournalEntry {
     type Error = Error;
 
     fn try_from(
-        (uuid, payee, created, creditors, debitors, tags, note): (
-            u128,
-            String,
-            String,
-            Vec<Creditor>,
-            Vec<Debitor>,
-            String,
-            String,
-        ),
+        (uuid, payee, created, tags, note): (u128, String, String, String, String),
     ) -> Result<JournalEntry> {
         let payee = payee.trim().to_string();
         let created: chrono::DateTime<chrono::Utc> = {
@@ -848,8 +873,8 @@ impl
             uuid,
             payee,
             created,
-            creditors,
-            debitors,
+            creditors: Default::default(),
+            debitors: Default::default(),
             tags,
             note,
         })
@@ -869,37 +894,26 @@ impl JournalEntry {
         }
     }
 
-    fn add_creditor(&mut self, ledger: Key, commodity: (Key, f64)) {
-        self.creditors.push(Creditor { ledger, commodity });
+    fn add_creditor(
+        &mut self,
+        company: String,
+        ledger: String,
+        commodity: (String, f64),
+    ) -> Result<()> {
+        let creditor: Creditor = (company, ledger, commodity.0, commodity.1).try_into()?;
+        self.creditors.push(creditor);
+        Ok(())
     }
 
-    fn add_debitor(&mut self, ledger: Key, commodity: (Key, f64)) {
-        self.debitors.push(Debitor { ledger, commodity });
-    }
-
-    fn has_tag(&self, tag: &str) -> bool {
-        self.tags.iter().any(|t| t == tag)
-    }
-
-    fn add_tag(&mut self, tag: &str) {
-        if !self.has_tag(tag) {
-            self.tags.push(tag.to_string())
-        }
-
-        self.tags.sort();
-    }
-
-    fn remove_tag(&mut self, tag: &str) {
-        for i in 0..self.tags.len() {
-            if self.tags[i] == tag {
-                self.tags.remove(i);
-                break;
-            }
-        }
-    }
-
-    fn set_note(&mut self, note: String) {
-        self.note = note
+    fn add_debitor(
+        &mut self,
+        company: String,
+        ledger: String,
+        commodity: (String, f64),
+    ) -> Result<()> {
+        let debitor: Debitor = (company, ledger, commodity.0, commodity.1).try_into()?;
+        self.debitors.push(debitor);
+        Ok(())
     }
 }
 
@@ -909,14 +923,13 @@ impl Durable for JournalEntry {
     }
 
     fn to_key(&self) -> String {
-        format!(
-            "{}-{}-{}-{}-{}",
+        let (y, m, d) = (
             self.created.year(),
             self.created.month(),
             self.created.day(),
-            self.to_type(),
-            self.uuid
-        )
+        );
+        let jek: KeyJournalEntry = (y, m, d, self.uuid).into();
+        jek.into()
     }
 
     fn encode(&self) -> Result<String> {

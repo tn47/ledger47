@@ -3,7 +3,7 @@ use log::error;
 use simplelog;
 use structopt::StructOpt;
 
-use std::fs;
+use std::{ffi, fs};
 
 mod app;
 mod edit_buffer;
@@ -13,7 +13,7 @@ mod term_layers;
 
 use ledger::{
     core::{Error, Result},
-    err_at,
+    db_files, err_at,
 };
 
 // commands:
@@ -57,7 +57,8 @@ fn main() {
             std::process::exit(1);
         }
     }
-    match app::run(opts) {
+    let dir: &ffi::OsStr = opts.dir.as_ref();
+    match app::Application::<db_files::Db>::run(dir) {
         Ok(()) => (),
         Err(err) => error!("{}", err),
     }

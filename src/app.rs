@@ -132,7 +132,10 @@ where
             Ok(store) => {
                 info!("Open workspace dir:{:?}", dir);
                 app.store = Some(store);
-                app.view.layers = vec![Layer::OpenCompany(tl::OpenCompany::new(&mut app)?)];
+                app.view.layers = vec![
+                    //
+                    Layer::OpenCompany(tl::OpenCompany::new(&mut app)?)
+                ];
                 Ok(())
             }
             Err(Error::NotFound(_)) => {

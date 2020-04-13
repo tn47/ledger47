@@ -14,8 +14,8 @@ path = "src/main.rs"
 [dependencies]
 structopt = { version = "*", default-features = false }
 chrono = "0.4.11"
-jsondata = { path = "../jsondata" }
-llrb-index = { path = "../llrb-index" }
+jsondata = { git = "https://github.com/bnclabs/jsondata.git" }
+llrb-index = { git = "https://github.com/bnclabs/llrb-index.git" }
 uuid = { version = "0.8.1", features = ["v4"] }
 crossterm = "0.16.0"
 unicode-width = "0.1.5"

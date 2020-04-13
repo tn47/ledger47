@@ -487,6 +487,7 @@ where
     }
 }
 
+#[derive(Debug)]
 struct TabOffsets(Vec<usize>);
 
 impl TabOffsets {

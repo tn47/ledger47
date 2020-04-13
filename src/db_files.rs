@@ -6,7 +6,7 @@ use std::{ffi, fs, path};
 
 use crate::{
     core::{Durable, Error, Result, Store, Transaction},
-    types::{self, Workspace},
+    types,
 };
 
 // TODO: add git description.
@@ -114,7 +114,7 @@ impl From<FileLoc> for ffi::OsString {
 
 pub struct Db {
     dir: ffi::OsString,
-    w: Workspace,
+    w: types::Workspace,
     repo: Option<git2::Repository>,
     remotes: Vec<git2::Repository>,
 }
@@ -206,7 +206,7 @@ impl Db {
 impl Store for Db {
     type Txn = DbTransaction;
 
-    fn create(dir: &ffi::OsStr, w: Workspace) -> Result<Db> {
+    fn create(dir: &ffi::OsStr, w: types::Workspace) -> Result<Db> {
         let repo = err_at!(
             IOError,
             git2::Repository::init(dir),
@@ -245,7 +245,7 @@ impl Store for Db {
         let w_dir = path::Path::new(dir);
         if w_dir.exists() {
             let file_loc = FileLoc::from_key(dir, "workspace");
-            let w: Workspace = file_loc.to_value()?;
+            let w: types::Workspace = file_loc.to_value()?;
 
             let repo = err_at!(
                 IOError,
@@ -274,7 +274,10 @@ impl Store for Db {
             {
                 let head_commit = db.get_head_commit()?;
                 if head_commit.message().unwrap().starts_with("txn commit") {
-                    let parent = err_at!(IOError, head_commit.parent(0), format!("git parent"))?;
+                    let parent = err_at!(
+                        //
+                        IOError, head_commit.parent(0), format!("git parent")
+                    )?;
                     let mut cob = git2::build::CheckoutBuilder::new();
                     cob.force();
                     err_at!(
@@ -389,13 +392,13 @@ impl Store for Db {
         self.w.set_txn_uuid(uuid);
         self.put(self.w.clone())?;
 
-        let (old_head_oid, new_head_oid) = self.do_commit(&format!("txn commit {}", uuid))?;
-        trace!("git txn-commit {}->{}", old_head_oid, new_head_oid);
+        let (oh_oid, nh_oid) = self.do_commit(&format!("txn commit {}", uuid))?;
+        trace!("git txn-commit {}->{}", oh_oid, nh_oid);
 
         Ok(DbTransaction {
             uuid,
-            old_head_oid,
-            new_head_oid,
+            old_head_oid: oh_oid,
+            new_head_oid: nh_oid,
             db: self,
         })
     }
@@ -532,7 +535,9 @@ impl MetadataDir {
         V: Durable,
     {
         let mut dfs = vec![];
-        for item in err_at!(IOError, fs::read_dir(&self.0), format!("{:?}", self.0))? {
+        let dir = &self.0;
+        let es = err_at!(IOError, fs::read_dir(dir), format!("{:?}", dir))?;
+        for item in es {
             let item = err_at!(IOError, item, format!("{:?}", self.0))?;
             dfs.push(Ok(FileLoc::new(&self.0, &item.file_name()).to_value()?));
         }
@@ -696,7 +701,8 @@ where
                 None if self.years.len() == 0 => break None,
                 None => {
                     let from = self.from.with_year(self.years.remove(0)).unwrap();
-                    self.year = Some(JournalYear::new(self.journal_dir.clone(), from));
+                    let jy = JournalYear::new(self.journal_dir.clone(), from);
+                    self.year = Some(jy);
                 }
             }
         }
@@ -751,7 +757,8 @@ where
                 None if self.months.len() == 0 => break None,
                 None => {
                     let month = self.months.remove(0);
-                    self.month = Some(JournalMonth::new(self.year_dir.clone(), month));
+                    let jm = JournalMonth::new(self.year_dir.clone(), month);
+                    self.month = Some(jm);
                 }
             }
         }

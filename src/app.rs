@@ -169,16 +169,13 @@ where
 
             let evnt = match evnt {
                 Event::Resize { .. } => None,
-                mut evnt => {
-                    let mut layers: Vec<Layer<S>> = self.view.layers.drain(..).collect();
-                    for layer in layers.iter_mut().rev() {
-                        evnt = match layer.handle_event(&mut self, evnt.clone())? {
-                            Some(evnt) => evnt,
-                            None => break,
-                        }
-                    }
-                    self.view.layers = layers;
-                    Some(evnt)
+                evnt => match self.view.layers.pop() {
+                    Some(mut layer) => {
+                        let evnt = layer.handle_event(&mut self, evnt.clone())?;
+                        self.view.layers.push(layer);
+                        evnt
+                    },
+                    None => Some(evnt)
                 }
             };
 
@@ -198,7 +195,7 @@ where
         }
     }
 
-    fn handle_event(&mut self, mut evnt: Event) -> Result<Option<Event>> {
+    fn handle_event(&mut self, evnt: Event) -> Result<Option<Event>> {
         let m = evnt.to_modifiers();
         match evnt.to_key_code() {
             Some(KeyCode::Esc) if m.is_empty() && self.view.layers.len() > 1 => {

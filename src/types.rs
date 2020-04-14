@@ -18,6 +18,8 @@ pub type Key = String;
 #[derive(Clone, JsonSerialize)]
 pub struct Workspace {
     pub name: String,
+    #[json(to_string)]
+    pub updated: chrono::DateTime<chrono::Utc>,
     pub commodity: Key,
     pub remotes: Vec<String>,
     pub txn_uuid: u128,
@@ -55,6 +57,7 @@ impl TryFrom<(String, String, String)> for Workspace {
 
         Ok(Workspace {
             name,
+            updated: chrono::Utc::now(),
             commodity,
             remotes,
             txn_uuid: Default::default(),
@@ -66,6 +69,7 @@ impl Default for Workspace {
     fn default() -> Workspace {
         Workspace {
             name: Default::default(),
+            updated: chrono::Utc::now(),
             commodity: Default::default(),
             remotes: Default::default(),
             txn_uuid: Default::default(),
@@ -135,7 +139,7 @@ impl Durable for Workspace {
 }
 
 #[derive(Clone)]
-struct KeyCommodity(String);
+pub struct KeyCommodity(String);
 
 // (commodity-name,)
 impl From<(String,)> for KeyCommodity {
@@ -173,12 +177,14 @@ impl fmt::Display for KeyCommodity {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Commodity {
-    name: String,
-    value: f64,
-    symbol: String,
-    aliases: Vec<String>,
-    tags: Vec<String>,
-    note: String,
+    pub name: String,
+    pub value: f64,
+    #[json(to_string)]
+    pub updated: chrono::DateTime<chrono::Utc>,
+    pub symbol: String,
+    pub aliases: Vec<String>,
+    pub tags: Vec<String>,
+    pub note: String,
 }
 
 impl Default for Commodity {
@@ -186,6 +192,7 @@ impl Default for Commodity {
         Commodity {
             name: Default::default(),
             value: Default::default(),
+            updated: chrono::Utc::now(),
             symbol: Default::default(),
             aliases: Default::default(),
             tags: Default::default(),
@@ -257,6 +264,7 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
         Ok(Commodity {
             name,
             value: Default::default(),
+            updated: chrono::Utc::now(),
             symbol,
             aliases,
             tags,
@@ -270,6 +278,7 @@ impl Commodity {
         Commodity {
             name,
             value,
+            updated: chrono::Utc::now(),
             symbol: Default::default(),
             aliases: Default::default(),
             tags: Default::default(),
@@ -301,7 +310,7 @@ impl Durable for Commodity {
 }
 
 #[derive(Clone)]
-struct KeyCompany(String);
+pub struct KeyCompany(String);
 
 // (company-name,)
 impl From<(String,)> for KeyCompany {
@@ -339,12 +348,14 @@ impl fmt::Display for KeyCompany {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Company {
-    name: String,
+    pub name: String,
     #[json(to_string)]
-    created: chrono::DateTime<chrono::Utc>,
-    aliases: Vec<String>,
-    tags: Vec<String>,
-    note: String,
+    pub created: chrono::DateTime<chrono::Utc>,
+    #[json(to_string)]
+    pub updated: chrono::DateTime<chrono::Utc>,
+    pub aliases: Vec<String>,
+    pub tags: Vec<String>,
+    pub note: String,
 }
 
 impl Default for Company {
@@ -352,6 +363,7 @@ impl Default for Company {
         Company {
             name: Default::default(),
             created: chrono::Utc::now(),
+            updated: chrono::Utc::now(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
@@ -415,6 +427,7 @@ impl TryFrom<(String, String, String, String, String)> for Company {
         Ok(Company {
             name,
             created,
+            updated: chrono::Utc::now(),
             aliases,
             tags,
             note,
@@ -427,6 +440,7 @@ impl Company {
         Company {
             name,
             created,
+            updated: chrono::Utc::now(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
@@ -457,7 +471,7 @@ impl Durable for Company {
 }
 
 #[derive(Clone)]
-pub(crate) struct KeyLedger(String);
+pub struct KeyLedger(String);
 
 // (company-name, ledger-name)
 impl From<(String, String)> for KeyLedger {
@@ -495,15 +509,17 @@ impl fmt::Display for KeyLedger {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Ledger {
-    name: String,
+    pub name: String,
     #[json(to_string)]
-    created: chrono::DateTime<chrono::Utc>,
-    company: Key,
+    pub created: chrono::DateTime<chrono::Utc>,
+    #[json(to_string)]
+    pub updated: chrono::DateTime<chrono::Utc>,
+    pub company: Key,
 
-    groups: Vec<String>,
-    aliases: Vec<String>,
-    tags: Vec<String>,
-    note: String,
+    pub groups: Vec<String>,
+    pub aliases: Vec<String>,
+    pub tags: Vec<String>,
+    pub note: String,
 }
 
 impl Default for Ledger {
@@ -511,6 +527,7 @@ impl Default for Ledger {
         Ledger {
             name: Default::default(),
             created: chrono::Utc::now(),
+            updated: chrono::Utc::now(),
             company: Default::default(),
             groups: Default::default(),
             aliases: Default::default(),
@@ -607,6 +624,7 @@ impl TryFrom<(String, String, String, String, String, String, String)> for Ledge
         Ok(Ledger {
             name,
             created,
+            updated: chrono::Utc::now(),
             company,
             groups,
             aliases,
@@ -621,6 +639,7 @@ impl Ledger {
         Ledger {
             name,
             created,
+            updated: chrono::Utc::now(),
             company,
             groups: Default::default(),
             aliases: Default::default(),
@@ -653,9 +672,9 @@ impl Durable for Ledger {
 }
 
 #[derive(Clone, JsonSerialize)]
-pub(crate) struct Creditor {
-    pub(crate) ledger: KeyLedger,
-    pub(crate) commodity: Commodity,
+pub struct Creditor {
+    pub ledger: KeyLedger,
+    pub commodity: Commodity,
 }
 
 // (company-name, ledger-name, commodity-name, value)
@@ -698,9 +717,9 @@ impl TryFrom<(String, String, String, f64)> for Creditor {
 }
 
 #[derive(Clone, JsonSerialize)]
-pub(crate) struct Debitor {
-    pub(crate) ledger: KeyLedger,
-    pub(crate) commodity: Commodity,
+pub struct Debitor {
+    pub ledger: KeyLedger,
+    pub commodity: Commodity,
 }
 
 // TryFrom<(company-name, ledger-name, commodity-name, value)>
@@ -743,7 +762,7 @@ impl TryFrom<(String, String, String, f64)> for Debitor {
 }
 
 #[derive(Clone)]
-struct KeyJournalEntry(String);
+pub struct KeyJournalEntry(String);
 
 impl From<(i32, u32, u32, u128)> for KeyJournalEntry {
     fn from((y, m, d, uuid): (i32, u32, u32, u128)) -> KeyJournalEntry {
@@ -794,14 +813,16 @@ impl fmt::Display for KeyJournalEntry {
 
 #[derive(Clone, JsonSerialize)]
 pub struct JournalEntry {
-    pub(crate) uuid: u128,
-    pub(crate) payee: String,
+    pub uuid: u128,
+    pub payee: String,
     #[json(to_string)]
-    pub(crate) created: chrono::DateTime<chrono::Utc>,
-    pub(crate) creditors: Vec<Creditor>,
-    pub(crate) debitors: Vec<Debitor>,
-    pub(crate) tags: Vec<String>,
-    pub(crate) note: String,
+    pub created: chrono::DateTime<chrono::Utc>,
+    #[json(to_string)]
+    pub updated: chrono::DateTime<chrono::Utc>,
+    pub creditors: Vec<Creditor>,
+    pub debitors: Vec<Debitor>,
+    pub tags: Vec<String>,
+    pub note: String,
 }
 
 impl Eq for JournalEntry {}
@@ -830,6 +851,7 @@ impl Default for JournalEntry {
             uuid: Default::default(),
             payee: Default::default(),
             created: chrono::Utc::now(),
+            updated: chrono::Utc::now(),
             creditors: Default::default(),
             debitors: Default::default(),
             tags: Default::default(),
@@ -873,6 +895,7 @@ impl TryFrom<(u128, String, String, String, String)> for JournalEntry {
             uuid,
             payee,
             created,
+            updated: chrono::Utc::now(),
             creditors: Default::default(),
             debitors: Default::default(),
             tags,
@@ -887,6 +910,7 @@ impl JournalEntry {
             uuid: uuid::Uuid::new_v4().as_u128(),
             payee,
             created,
+            updated: chrono::Utc::now(),
             creditors: Default::default(),
             debitors: Default::default(),
             tags: Default::default(),

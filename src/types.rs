@@ -17,6 +17,7 @@ pub type Key = String;
 
 #[derive(Clone, JsonSerialize)]
 pub struct Workspace {
+    pub doc_type: String,
     pub name: String,
     #[json(to_string)]
     pub updated: chrono::DateTime<chrono::Utc>,
@@ -55,25 +56,33 @@ impl TryFrom<(String, String, String)> for Workspace {
                 .collect()
         };
 
-        Ok(Workspace {
+        let mut w = Workspace {
+            doc_type: Default::default(),
             name,
             updated: chrono::Utc::now(),
             commodity,
             remotes,
             txn_uuid: Default::default(),
-        })
+        };
+        w.doc_type = w.to_type();
+
+        Ok(w)
     }
 }
 
 impl Default for Workspace {
     fn default() -> Workspace {
-        Workspace {
+        let mut w = Workspace {
+            doc_type: Default::default(),
             name: Default::default(),
             updated: chrono::Utc::now(),
             commodity: Default::default(),
             remotes: Default::default(),
             txn_uuid: Default::default(),
-        }
+        };
+        w.doc_type = w.to_type();
+
+        w
     }
 }
 
@@ -177,6 +186,7 @@ impl fmt::Display for KeyCommodity {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Commodity {
+    pub doc_type: String,
     pub name: String,
     pub value: f64,
     #[json(to_string)]
@@ -189,7 +199,8 @@ pub struct Commodity {
 
 impl Default for Commodity {
     fn default() -> Commodity {
-        Commodity {
+        let mut c = Commodity {
+            doc_type: Default::default(),
             name: Default::default(),
             value: Default::default(),
             updated: chrono::Utc::now(),
@@ -197,7 +208,10 @@ impl Default for Commodity {
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        c.doc_type = c.to_type();
+
+        c
     }
 }
 
@@ -261,7 +275,8 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
             tags
         };
 
-        Ok(Commodity {
+        let mut c = Commodity {
+            doc_type: Default::default(),
             name,
             value: Default::default(),
             updated: chrono::Utc::now(),
@@ -269,13 +284,17 @@ impl TryFrom<(String, String, String, String, String)> for Commodity {
             aliases,
             tags,
             note,
-        })
+        };
+        c.doc_type = c.to_type();
+
+        Ok(c)
     }
 }
 
 impl Commodity {
     fn new(name: String, value: f64) -> Commodity {
-        Commodity {
+        let mut c = Commodity {
+            doc_type: Default::default(),
             name,
             value,
             updated: chrono::Utc::now(),
@@ -283,7 +302,10 @@ impl Commodity {
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        c.doc_type = c.to_type();
+
+        c
     }
 }
 
@@ -348,6 +370,7 @@ impl fmt::Display for KeyCompany {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Company {
+    pub doc_type: String,
     pub name: String,
     #[json(to_string)]
     pub created: chrono::DateTime<chrono::Utc>,
@@ -360,14 +383,18 @@ pub struct Company {
 
 impl Default for Company {
     fn default() -> Company {
-        Company {
+        let mut c = Company {
+            doc_type: Default::default(),
             name: Default::default(),
             created: chrono::Utc::now(),
             updated: chrono::Utc::now(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        c.doc_type = c.to_type();
+
+        c
     }
 }
 
@@ -424,27 +451,35 @@ impl TryFrom<(String, String, String, String, String)> for Company {
             tags
         };
 
-        Ok(Company {
+        let mut c = Company {
+            doc_type: Default::default(),
             name,
             created,
             updated: chrono::Utc::now(),
             aliases,
             tags,
             note,
-        })
+        };
+        c.doc_type = c.to_type();
+
+        Ok(c)
     }
 }
 
 impl Company {
     fn new(name: String, created: chrono::DateTime<chrono::Utc>) -> Company {
-        Company {
+        let mut c =Company {
+            doc_type: Default::default(),
             name,
             created,
             updated: chrono::Utc::now(),
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        c.doc_type = c.to_type();
+
+        c
     }
 }
 
@@ -509,6 +544,7 @@ impl fmt::Display for KeyLedger {
 
 #[derive(Clone, JsonSerialize)]
 pub struct Ledger {
+    pub doc_type: String,
     pub name: String,
     #[json(to_string)]
     pub created: chrono::DateTime<chrono::Utc>,
@@ -524,7 +560,8 @@ pub struct Ledger {
 
 impl Default for Ledger {
     fn default() -> Ledger {
-        Ledger {
+        let mut l = Ledger {
+            doc_type: Default::default(),
             name: Default::default(),
             created: chrono::Utc::now(),
             updated: chrono::Utc::now(),
@@ -533,7 +570,10 @@ impl Default for Ledger {
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        l.doc_type = l.to_type();
+
+        l
     }
 }
 
@@ -621,7 +661,8 @@ impl TryFrom<(String, String, String, String, String, String, String)> for Ledge
             tags
         };
 
-        Ok(Ledger {
+        let mut l = Ledger {
+            doc_type: Default::default(),
             name,
             created,
             updated: chrono::Utc::now(),
@@ -630,13 +671,17 @@ impl TryFrom<(String, String, String, String, String, String, String)> for Ledge
             aliases,
             tags,
             note,
-        })
+        };
+        l.doc_type = l.to_type();
+
+        Ok(l)
     }
 }
 
 impl Ledger {
     fn new(name: String, created: chrono::DateTime<chrono::Utc>, company: Key) -> Ledger {
-        Ledger {
+        let mut l = Ledger {
+            doc_type: Default::default(),
             name,
             created,
             updated: chrono::Utc::now(),
@@ -645,7 +690,10 @@ impl Ledger {
             aliases: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        l.doc_type = l.to_type();
+
+        l
     }
 }
 
@@ -813,6 +861,7 @@ impl fmt::Display for KeyJournalEntry {
 
 #[derive(Clone, JsonSerialize)]
 pub struct JournalEntry {
+    pub doc_type: String,
     pub uuid: u128,
     pub payee: String,
     #[json(to_string)]
@@ -847,7 +896,8 @@ impl Ord for JournalEntry {
 
 impl Default for JournalEntry {
     fn default() -> JournalEntry {
-        JournalEntry {
+        let mut je = JournalEntry {
+            doc_type: Default::default(),
             uuid: Default::default(),
             payee: Default::default(),
             created: chrono::Utc::now(),
@@ -856,7 +906,10 @@ impl Default for JournalEntry {
             debitors: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+        je.doc_type = je.to_type();
+
+        je
     }
 }
 
@@ -891,7 +944,8 @@ impl TryFrom<(u128, String, String, String, String)> for JournalEntry {
             tags
         };
 
-        Ok(JournalEntry {
+        let mut je = JournalEntry {
+            doc_type: Default::default(),
             uuid,
             payee,
             created,
@@ -900,13 +954,17 @@ impl TryFrom<(u128, String, String, String, String)> for JournalEntry {
             debitors: Default::default(),
             tags,
             note,
-        })
+        };
+        je.doc_type = je.to_type();
+
+        Ok(je)
     }
 }
 
 impl JournalEntry {
     fn new(payee: String, created: chrono::DateTime<chrono::Utc>) -> JournalEntry {
-        JournalEntry {
+        let mut je = JournalEntry {
+            doc_type: Default::default(),
             uuid: uuid::Uuid::new_v4().as_u128(),
             payee,
             created,
@@ -915,7 +973,10 @@ impl JournalEntry {
             debitors: Default::default(),
             tags: Default::default(),
             note: Default::default(),
-        }
+        };
+
+        je.doc_type = je.to_type();
+        je
     }
 
     fn add_creditor(

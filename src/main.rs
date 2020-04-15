@@ -67,7 +67,7 @@ fn main() {
 fn init_logger(opts: &Opt) -> Result<()> {
     let mut home_dir = match dirs::home_dir() {
         Some(home_dir) => Ok(home_dir),
-        None => Err(Error::Fatal("home directory not found !!".to_string())),
+        None => err_at!(Fatal, msg: "home directory not found !!".to_string()),
     }?;
     let log_file = {
         home_dir.push(".ledger47");
